@@ -1,6 +1,5 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   experimental: {
     serverActions: {
       // Default is 1MB. Raised to fit the 5MB avatar upload limit plus
