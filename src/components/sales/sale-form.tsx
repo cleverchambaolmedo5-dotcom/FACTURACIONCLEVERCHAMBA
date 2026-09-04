@@ -177,7 +177,6 @@ export function SaleForm({
     <form
       action={formAction}
       onSubmit={handleSubmit}
-      encType="multipart/form-data"
       className="max-w-2xl space-y-6"
       noValidate
     >

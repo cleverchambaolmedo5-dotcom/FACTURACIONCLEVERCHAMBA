@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useEffectEvent, useRef, useState, useTransition } from "react";
 import { Search } from "lucide-react";
 import { UserRole } from "@/generated/prisma/enums";
 import {
@@ -48,7 +48,34 @@ export function CustomerSelector({
   const [isPending, startTransition] = useTransition();
   const latestRequest = useRef(0);
 
+  // DEBUG INSTRUMENTATION -- temporary, remove after diagnosing the
+  // repeated-search issue.
   useEffect(() => {
+    console.log("[CustomerSelector] MOUNTED");
+    return () => console.log("[CustomerSelector] UNMOUNTED");
+  }, []);
+
+  // `searchAction` is a Server Action reference passed down from the
+  // server-rendered page. It is *not* guaranteed to keep the same JS
+  // identity across every render (e.g. a route revalidation triggered by
+  // anything else on the page hands the client a freshly-deserialized
+  // reference for the same action). useEffectEvent gives us a handle that
+  // always calls the *latest* searchAction without being itself a reactive
+  // value -- so it can be called from the effect below without being a
+  // dependency, and an identity change alone can never re-trigger a search.
+  const runSearch = useEffectEvent(async (trimmed: string, requestId: number) => {
+    console.log("[CustomerSelector] runSearch CALLED", { trimmed, requestId });
+    const found = await searchAction(trimmed);
+    // Ignore results from a stale, superseded request (e.g. the user kept
+    // typing after this search fired).
+    if (latestRequest.current === requestId) {
+      setResults(found);
+      setHasSearched(true);
+    }
+  });
+
+  useEffect(() => {
+    console.log("[CustomerSelector] search-effect RAN", { query });
     const trimmed = query.trim();
     if (!trimmed) {
       // Clearing the query is handled synchronously in handleQueryChange
@@ -59,19 +86,11 @@ export function CustomerSelector({
 
     const requestId = ++latestRequest.current;
     const timeout = setTimeout(() => {
-      startTransition(async () => {
-        const found = await searchAction(trimmed);
-        // Ignore results from a stale, superseded request (e.g. the user
-        // kept typing after this search fired).
-        if (latestRequest.current === requestId) {
-          setResults(found);
-          setHasSearched(true);
-        }
-      });
+      startTransition(() => runSearch(trimmed, requestId));
     }, SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timeout);
-  }, [query, searchAction]);
+  }, [query]);
 
   function handleQueryChange(value: string) {
     setQuery(value);

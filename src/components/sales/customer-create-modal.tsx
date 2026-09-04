@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { UserRole } from "@/generated/prisma/enums";
 import type { CustomerFormState } from "@/app/(app)/clientes/actions";
@@ -67,7 +68,11 @@ export function CustomerCreateModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
-  return (
+  // Rendered via a portal into document.body -- this modal's own <form>
+  // must never end up nested inside the "Nueva venta" form's DOM tree
+  // (invalid HTML that React can't hydrate), which is unavoidable if it
+  // renders in place, since CustomerSelector lives inside that form.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       role="dialog"
@@ -89,7 +94,17 @@ export function CustomerCreateModal({
           </button>
         </div>
 
-        <form action={formAction} className="space-y-4" noValidate>
+        <form
+          action={formAction}
+          // Rendered via a portal, but still a React-tree descendant of the
+          // "Nueva venta" <form> -- its submit event bubbles through that
+          // tree (not the DOM tree) and would otherwise reach the sale
+          // form's onSubmit, whose receipt-file check calls
+          // preventDefault() and silently cancels this form's own submit.
+          onSubmit={(event) => event.stopPropagation()}
+          className="space-y-4"
+          noValidate
+        >
           <div className="space-y-1">
             <label htmlFor="modal-fullName" className="text-sm font-medium text-foreground">
               Nombre completo
@@ -230,6 +245,7 @@ export function CustomerCreateModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
