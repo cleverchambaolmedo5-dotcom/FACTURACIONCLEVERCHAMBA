@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Raw values live here as plain custom properties; the
+ * `@theme inline` block below aliases them to `--color-*` names so
+ * Tailwind generates utilities from them (e.g. `bg-primary`,
+ * `text-sidebar-foreground`). Components must consume these utilities
+ * instead of hardcoding hex values.
+ */
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+
+  --surface: #ffffff;
+  --border: #e2e8f0;
+
+  --muted-foreground: #64748b;
+
+  --brand-primary: #2563eb;
+  --brand-primary-dark: #1d4ed8;
+  --brand-primary-foreground: #ffffff;
+
+  --sidebar: #0f172a;
+  --sidebar-foreground: #e2e8f0;
+  --sidebar-border: #1e293b;
+  --sidebar-accent: #1e293b;
+
+  --status-success: #16a34a;
+  --status-warning: #f59e0b;
+  --status-error: #dc2626;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-primary: var(--brand-primary);
+  --color-primary-dark: var(--brand-primary-dark);
+  --color-primary-foreground: var(--brand-primary-foreground);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+
+  --color-success: var(--status-success);
+  --color-warning: var(--status-warning);
+  --color-error: var(--status-error);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
