@@ -6,12 +6,12 @@
     "node": ">=20.9.0"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "db:seed": "tsx prisma/seed.ts"
-  },
+  "dev": "next dev",
+  "build": "next build --webpack",
+  "start": "next start",
+  "lint": "eslint",
+  "db:seed": "tsx prisma/seed.ts"
+},
   "dependencies": {
     "@next/swc-wasm-nodejs": "16.3.4",
     "@prisma/adapter-pg": "^7.10.0",
