@@ -1,5 +1,5 @@
 import "server-only";
-import { UserRole, SaleStatus } from "@/generated/prisma/enums";
+import { UserRole, SaleStatus, PaymentMethod } from "@/generated/prisma/enums";
 import type { PublicUser } from "@/lib/auth/session";
 import { isValidUuid } from "@/lib/validation";
 import * as saleRepository from "@/server/repositories/sale-repository";
@@ -38,7 +38,13 @@ export type SaleFieldErrors = Partial<
     // Aggregate mismatch between the sum of installment amounts and the
     // sale's final price -- not tied to any single cuota, hence a flat
     // message rather than a per-index array like installmentAmounts below.
-    | "installmentsTotal",
+    | "installmentsTotal"
+    // Only populated when registerInitialPayment is checked -- see
+    // createSaleForUser's initial-payment block below.
+    | "initialPaymentAmount"
+    | "initialPaymentDate"
+    | "initialPaymentMethod"
+    | "initialPaymentReceipt",
     string
   >
 > & {
@@ -75,6 +81,17 @@ export type RawSaleInput = {
   // Mandatory -- a Sale can never be created without a receipt attached,
   // see the validation in createSaleForUser below.
   receipt?: FormDataEntryValue | null;
+  // --- Initial payment (optional): present only when the customer already
+  // paid installment #1 at the moment the sale is registered. Checkbox
+  // value is the literal string "on" when checked, absent otherwise --
+  // every field below is only validated/required when it is.
+  registerInitialPayment?: FormDataEntryValue | null;
+  initialPaymentAmount?: FormDataEntryValue | null;
+  initialPaymentDate?: FormDataEntryValue | null;
+  initialPaymentMethod?: FormDataEntryValue | null;
+  initialPaymentReference?: FormDataEntryValue | null;
+  initialPaymentNotes?: FormDataEntryValue | null;
+  initialPaymentReceipt?: FormDataEntryValue | null;
 };
 
 function str(value: FormDataEntryValue | null | undefined): string {
@@ -103,6 +120,12 @@ function centsToDecimalString(cents: number): string {
 
 function isValidSaleStatus(value: string | undefined): value is SaleStatus {
   return !!value && (Object.values(SaleStatus) as string[]).includes(value);
+}
+
+/** Mirrors payment-service.ts's own isValidPaymentMethod -- duplicated rather than shared, same pattern as parseDateOnly/toCents above. */
+const PAYMENT_METHOD_VALUES = Object.values(PaymentMethod) as string[];
+function isValidPaymentMethod(value: string): value is PaymentMethod {
+  return PAYMENT_METHOD_VALUES.includes(value);
 }
 
 /**
@@ -433,6 +456,71 @@ export async function createSaleForUser(
     }
   }
 
+  // --- Initial payment (optional): if the customer already paid
+  // installment #1 at the moment the sale is registered, this block
+  // validates that data exactly like registerPaymentForUser validates a
+  // manually-registered payment (amount/date/method/receipt), plus one
+  // extra rule specific to this entry point: the amount can never exceed
+  // installment #1's own amount, since it can only ever pay that one
+  // cuota. Entirely opt-in -- skipped whenever the checkbox isn't checked,
+  // so existing sales with no initial payment are completely unaffected.
+  const registerInitialPayment = str(raw.registerInitialPayment) === "on";
+  let initialPaymentAmountCents = 0;
+  let initialPaymentDate: Date | null = null;
+  let initialPaymentMethod: PaymentMethod | null = null;
+  let initialPaymentReceiptFile: File | null = null;
+
+  if (registerInitialPayment) {
+    const ipAmountRaw = str(raw.initialPaymentAmount);
+    const ipAmountValue = Number(ipAmountRaw);
+    if (!ipAmountRaw || !Number.isFinite(ipAmountValue)) {
+      errors.initialPaymentAmount = "El monto pagado es obligatorio.";
+    } else if (ipAmountValue <= 0) {
+      errors.initialPaymentAmount = "El monto pagado debe ser mayor a cero.";
+    } else {
+      initialPaymentAmountCents = toCents(ipAmountValue);
+      if (
+        hasValidInstallmentsCount &&
+        installmentAmountCents.length === installmentsCount &&
+        !errors.installmentAmounts &&
+        initialPaymentAmountCents > installmentAmountCents[0]
+      ) {
+        errors.initialPaymentAmount =
+          "El monto pagado no puede superar el valor de la primera cuota.";
+      }
+    }
+
+    const ipDateRaw = str(raw.initialPaymentDate);
+    initialPaymentDate = ipDateRaw ? parseDateOnly(ipDateRaw) : null;
+    if (!initialPaymentDate) {
+      errors.initialPaymentDate = "La fecha del pago no es válida.";
+    }
+
+    const ipMethodRaw = str(raw.initialPaymentMethod);
+    if (!ipMethodRaw || !isValidPaymentMethod(ipMethodRaw)) {
+      errors.initialPaymentMethod = "Selecciona un método de pago válido.";
+    } else {
+      initialPaymentMethod = ipMethodRaw;
+    }
+
+    const ipReceipt =
+      raw.initialPaymentReceipt instanceof File && raw.initialPaymentReceipt.size > 0
+        ? raw.initialPaymentReceipt
+        : null;
+    if (!ipReceipt) {
+      errors.initialPaymentReceipt = "Debes adjuntar un comprobante del pago inicial.";
+    } else {
+      const validationError = validateReceiptFile(ipReceipt);
+      if (validationError === "type") {
+        errors.initialPaymentReceipt = "Solo se permiten archivos PDF, JPG, JPEG, PNG o WEBP.";
+      } else if (validationError === "size") {
+        errors.initialPaymentReceipt = `El comprobante no debe superar ${Math.floor(MAX_RECEIPT_BYTES / (1024 * 1024))} MB.`;
+      } else {
+        initialPaymentReceiptFile = ipReceipt;
+      }
+    }
+  }
+
   // --- Receipt: mandatory. An empty file input still arrives as a
   // zero-byte File with an empty name -- treat that as "no file selected"
   // and reject it, the same as a missing field entirely. This is the only
@@ -461,7 +549,12 @@ export async function createSaleForUser(
     !hasValidInstallmentsCount ||
     installmentDueDates.length !== installmentsCount ||
     installmentAmountCents.length !== installmentsCount ||
-    !receiptFile
+    !receiptFile ||
+    (registerInitialPayment &&
+      (initialPaymentAmountCents <= 0 ||
+        !initialPaymentDate ||
+        !initialPaymentMethod ||
+        !initialPaymentReceiptFile))
   ) {
     return { ok: false, errors };
   }
@@ -492,11 +585,32 @@ export async function createSaleForUser(
     return { ok: false, formError: "No se pudo guardar el comprobante. Intenta nuevamente." };
   }
 
+  // Same "save to disk once, up front" treatment as the sale's own receipt
+  // above -- its content never depends on the sale/transaction outcome, and
+  // on any failure below it's deleted again so a failed registration never
+  // leaves an orphaned file with no Payment/PaymentReceipt row.
+  let savedInitialPaymentReceipt: Awaited<ReturnType<typeof saveReceiptFile>> | null = null;
+  if (registerInitialPayment && initialPaymentReceiptFile) {
+    try {
+      savedInitialPaymentReceipt = await saveReceiptFile(initialPaymentReceiptFile, "payment");
+    } catch (error) {
+      console.error("[sales] Failed to save initial payment receipt file:", error);
+      await deleteReceiptFile(savedReceipt.fileUrl, "sale");
+      return {
+        ok: false,
+        formError: "No se pudo guardar el comprobante del pago inicial. Intenta nuevamente.",
+      };
+    }
+  }
+
   try {
-    // Sale + Installments + SaleReceipt are created together in one Prisma
-    // transaction (see sale-repository.createSaleWithInstallments) -- a
-    // sale can never exist without its installments or its receipt, or
-    // vice versa.
+    // Sale + Installments + SaleReceipt (+ the initial Payment/
+    // PaymentReceipt against installment #1, if provided) are created
+    // together in one Prisma transaction (see
+    // sale-repository.createSaleWithInstallments) -- a sale can never exist
+    // without its installments or its receipt, or vice versa, and it can
+    // never report success while "missing" the initial payment it was
+    // asked to record.
     const sale = await saleRepository.createSaleWithInstallments({
       customerId: customer.id,
       sellerId,
@@ -513,11 +627,31 @@ export async function createSaleForUser(
         fileType: savedReceipt.fileType,
         uploadedById: user.id,
       },
+      initialPayment:
+        registerInitialPayment && initialPaymentDate && initialPaymentMethod && savedInitialPaymentReceipt
+          ? {
+              amount: centsToDecimalString(initialPaymentAmountCents),
+              paymentDate: initialPaymentDate,
+              method: initialPaymentMethod,
+              reference: str(raw.initialPaymentReference) || undefined,
+              notes: str(raw.initialPaymentNotes) || undefined,
+              registeredById: user.id,
+              receipt: {
+                fileUrl: savedInitialPaymentReceipt.fileUrl,
+                fileName: savedInitialPaymentReceipt.fileName,
+                fileType: savedInitialPaymentReceipt.fileType,
+                uploadedById: user.id,
+              },
+            }
+          : undefined,
     });
     return { ok: true, id: sale.id };
   } catch (error) {
     console.error("[sales] Failed to create sale:", error);
     await deleteReceiptFile(savedReceipt.fileUrl, "sale");
+    if (savedInitialPaymentReceipt) {
+      await deleteReceiptFile(savedInitialPaymentReceipt.fileUrl, "payment");
+    }
     return { ok: false, formError: "No se pudo crear la venta. Intenta nuevamente." };
   }
 }

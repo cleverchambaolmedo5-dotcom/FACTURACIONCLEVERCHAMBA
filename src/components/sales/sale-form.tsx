@@ -1,10 +1,21 @@
 "use client";
 
 import { useActionState, useMemo, useRef, useState, type FormEvent } from "react";
-import { UserRole } from "@/generated/prisma/enums";
+import { PaymentMethod, UserRole } from "@/generated/prisma/enums";
 import type { SaleFormState } from "@/app/(app)/ventas/actions";
 import { CustomerSelector, type CustomerSearchResult } from "./customer-selector";
 import type { NewCustomerAction } from "./customer-create-modal";
+
+// Mirrors payment-form.tsx's own METHOD_LABELS -- duplicated rather than
+// shared since these are two separate client components in different
+// modules, same pattern as the small server-side helpers duplicated
+// between sale-service.ts and payment-service.ts.
+const METHOD_LABELS: Record<PaymentMethod, string> = {
+  CASH: "Efectivo",
+  BANK_TRANSFER: "Transferencia",
+  CARD: "Tarjeta",
+  OTHER: "Otro",
+};
 
 export type SaleFormAction = (
   state: SaleFormState,
@@ -111,6 +122,27 @@ export function SaleForm({
     null,
   );
 
+  // --- Initial payment (optional): "el cliente ya pagó la Cuota 1". When
+  // checked, creates a Payment (PENDING_VALIDATION) against installment #1
+  // together with the sale itself -- see sale-service.ts#createSaleForUser.
+  const [hasInitialPayment, setHasInitialPayment] = useState(false);
+  const [initialPaymentAmount, setInitialPaymentAmount] = useState("0.00");
+  const [initialPaymentDate, setInitialPaymentDate] = useState(defaultSaleDate);
+  const initialPaymentReceiptRef = useRef<HTMLInputElement>(null);
+  const [initialPaymentReceiptClientError, setInitialPaymentReceiptClientError] = useState<
+    string | null
+  >(null);
+  const initialPaymentReceiptError =
+    errors?.initialPaymentReceipt ?? initialPaymentReceiptClientError ?? undefined;
+
+  function handleToggleInitialPayment(checked: boolean) {
+    setHasInitialPayment(checked);
+    if (checked) {
+      setInitialPaymentAmount(installmentAmounts[0] ?? "0.00");
+      setInitialPaymentDate(saleDate);
+    }
+  }
+
   // Belt-and-suspenders: the actual, unbypassable rule lives in
   // createSaleForUser (server-side) -- this only blocks the obvious cases
   // (no file chosen, cuotas that don't add up to the final price) without
@@ -134,6 +166,16 @@ export function SaleForm({
       return;
     }
     setInstallmentsTotalClientError(null);
+
+    if (hasInitialPayment) {
+      const hasInitialPaymentFile = !!initialPaymentReceiptRef.current?.files?.length;
+      if (!hasInitialPaymentFile) {
+        event.preventDefault();
+        setInitialPaymentReceiptClientError("Debes adjuntar un comprobante del pago inicial.");
+        return;
+      }
+      setInitialPaymentReceiptClientError(null);
+    }
   }
 
   // Client-side state only drives the live preview below -- the actual
@@ -499,6 +541,152 @@ export function SaleForm({
           El precio final se recalcula y valida en el servidor; esta vista es solo una referencia.
           La suma de las cuotas debe coincidir exactamente con el precio final.
         </p>
+      </div>
+
+      <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
+        <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <input
+            type="checkbox"
+            checked={hasInitialPayment}
+            onChange={(event) => handleToggleInitialPayment(event.target.checked)}
+            disabled={pending}
+            className="h-4 w-4 rounded border-border"
+          />
+          El cliente ya pagó la Cuota 1 al momento de esta venta
+        </label>
+
+        {hasInitialPayment && (
+          <div className="space-y-4 pt-2">
+            <input type="hidden" name="registerInitialPayment" value="on" />
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label
+                  htmlFor="initialPaymentAmount"
+                  className="text-sm font-medium text-foreground"
+                >
+                  Monto pagado
+                </label>
+                <input
+                  id="initialPaymentAmount"
+                  name="initialPaymentAmount"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={initialPaymentAmount}
+                  onChange={(event) => setInitialPaymentAmount(event.target.value)}
+                  disabled={pending}
+                  className={fieldClass(!!errors?.initialPaymentAmount)}
+                />
+                {errors?.initialPaymentAmount && (
+                  <p className="text-sm text-error">{errors.initialPaymentAmount}</p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label
+                  htmlFor="initialPaymentDate"
+                  className="text-sm font-medium text-foreground"
+                >
+                  Fecha del pago
+                </label>
+                <input
+                  id="initialPaymentDate"
+                  name="initialPaymentDate"
+                  type="date"
+                  value={initialPaymentDate}
+                  onChange={(event) => setInitialPaymentDate(event.target.value)}
+                  disabled={pending}
+                  className={fieldClass(!!errors?.initialPaymentDate)}
+                />
+                {errors?.initialPaymentDate && (
+                  <p className="text-sm text-error">{errors.initialPaymentDate}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="initialPaymentMethod" className="text-sm font-medium text-foreground">
+                Método de pago
+              </label>
+              <select
+                id="initialPaymentMethod"
+                name="initialPaymentMethod"
+                defaultValue=""
+                disabled={pending}
+                className={fieldClass(!!errors?.initialPaymentMethod)}
+              >
+                <option value="" disabled>
+                  Selecciona un método…
+                </option>
+                {Object.values(PaymentMethod).map((method) => (
+                  <option key={method} value={method}>
+                    {METHOD_LABELS[method]}
+                  </option>
+                ))}
+              </select>
+              {errors?.initialPaymentMethod && (
+                <p className="text-sm text-error">{errors.initialPaymentMethod}</p>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="initialPaymentReference"
+                className="text-sm font-medium text-foreground"
+              >
+                Referencia <span className="font-normal text-muted-foreground">(opcional)</span>
+              </label>
+              <input
+                id="initialPaymentReference"
+                name="initialPaymentReference"
+                disabled={pending}
+                className={fieldClass(false)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="initialPaymentNotes" className="text-sm font-medium text-foreground">
+                Observaciones <span className="font-normal text-muted-foreground">(opcional)</span>
+              </label>
+              <textarea
+                id="initialPaymentNotes"
+                name="initialPaymentNotes"
+                rows={2}
+                disabled={pending}
+                className={fieldClass(false)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label
+                htmlFor="initialPaymentReceipt"
+                className="text-sm font-medium text-foreground"
+              >
+                Comprobante del pago inicial *
+              </label>
+              <input
+                ref={initialPaymentReceiptRef}
+                id="initialPaymentReceipt"
+                name="initialPaymentReceipt"
+                type="file"
+                accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
+                disabled={pending}
+                onChange={() => setInitialPaymentReceiptClientError(null)}
+                className={fieldClass(!!initialPaymentReceiptError)}
+              />
+              <p className="text-xs text-muted-foreground">PDF, JPG, PNG o WEBP. Máximo 5 MB.</p>
+              {initialPaymentReceiptError && (
+                <p className="text-sm text-error">{initialPaymentReceiptError}</p>
+              )}
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Este pago quedará pendiente de validación en Contabilidad → Comprobantes, igual que
+              cualquier otro pago registrado.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="space-y-1">

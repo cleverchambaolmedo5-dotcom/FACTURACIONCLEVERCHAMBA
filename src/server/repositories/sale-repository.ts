@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { SaleStatus } from "@/generated/prisma/enums";
+import type { PaymentMethod, SaleStatus } from "@/generated/prisma/enums";
+import * as paymentRepository from "@/server/repositories/payment-repository";
 
 // Pure data access for Sale/Installment/Product (read side used by the
 // sales form). No auth/RBAC awareness lives here -- callers
@@ -158,6 +159,24 @@ export type CreateSaleReceiptData = {
   uploadedById: string;
 };
 
+// Optional Payment (+ PaymentReceipt) created against installment #1 in the
+// same transaction as the sale, when the customer already paid it at the
+// moment the sale is registered -- see sale-service.ts#createSaleForUser's
+// "registerInitialPayment" handling. Mirrors RawPaymentInput/CreatePaymentData
+// in payment-service.ts/payment-repository.ts exactly, since this produces
+// the exact same kind of row (PENDING_VALIDATION, awaiting Contabilidad's
+// approval in Comprobantes) -- just created eagerly instead of through the
+// separate "Pagar" flow.
+export type CreateSaleInitialPaymentData = {
+  amount: string;
+  paymentDate: Date;
+  method: PaymentMethod;
+  reference?: string;
+  notes?: string;
+  registeredById: string;
+  receipt: CreateSaleReceiptData;
+};
+
 export type CreateSaleData = {
   customerId: string;
   sellerId: string;
@@ -175,17 +194,23 @@ export type CreateSaleData = {
   // Required -- see sale-service.ts#createSaleForUser, which never reaches
   // this call without an already-saved receipt file.
   receipt: CreateSaleReceiptData;
+  // Present only when the customer already paid installment #1 at sale
+  // creation time -- see CreateSaleInitialPaymentData above.
+  initialPayment?: CreateSaleInitialPaymentData;
 };
 
 /**
  * Creates a Sale together with all of its Installments and its
  * SaleReceipt in a single transaction: it must never be possible to end up
  * with a Sale that has no installments (or installments without a Sale),
- * or a Sale with no receipt, due to a partial failure.
+ * or a Sale with no receipt, due to a partial failure. When `initialPayment`
+ * is present, the Payment (+ PaymentReceipt) against installment #1 is
+ * created in this same transaction, so a sale can also never end up
+ * "missing" the initial payment its own creation reported succeeding.
  */
 export async function createSaleWithInstallments(data: CreateSaleData) {
   return prisma.$transaction(async (tx) => {
-    return tx.sale.create({
+    const sale = await tx.sale.create({
       data: {
         customerId: data.customerId,
         sellerId: data.sellerId,
@@ -211,8 +236,32 @@ export async function createSaleWithInstallments(data: CreateSaleData) {
           },
         },
       },
-      select: { id: true },
+      select: { id: true, installments: { select: { id: true, installmentNumber: true } } },
     });
+
+    if (data.initialPayment) {
+      const firstInstallment = sale.installments.find((i) => i.installmentNumber === 1);
+      if (firstInstallment) {
+        const payment = await paymentRepository.createPayment(tx, {
+          installmentId: firstInstallment.id,
+          amount: data.initialPayment.amount,
+          paymentDate: data.initialPayment.paymentDate,
+          method: data.initialPayment.method,
+          reference: data.initialPayment.reference,
+          notes: data.initialPayment.notes,
+          registeredById: data.initialPayment.registeredById,
+        });
+        await paymentRepository.createPaymentReceipt(tx, {
+          paymentId: payment.id,
+          fileUrl: data.initialPayment.receipt.fileUrl,
+          fileName: data.initialPayment.receipt.fileName,
+          fileType: data.initialPayment.receipt.fileType,
+          uploadedById: data.initialPayment.receipt.uploadedById,
+        });
+      }
+    }
+
+    return { id: sale.id };
   });
 }
 

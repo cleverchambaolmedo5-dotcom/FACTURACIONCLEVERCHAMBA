@@ -33,6 +33,13 @@ export async function createSaleAction(
     sellerId: formData.get("sellerId"),
     bankAccountId: formData.get("bankAccountId"),
     receipt: formData.get("receipt"),
+    registerInitialPayment: formData.get("registerInitialPayment"),
+    initialPaymentAmount: formData.get("initialPaymentAmount"),
+    initialPaymentDate: formData.get("initialPaymentDate"),
+    initialPaymentMethod: formData.get("initialPaymentMethod"),
+    initialPaymentReference: formData.get("initialPaymentReference"),
+    initialPaymentNotes: formData.get("initialPaymentNotes"),
+    initialPaymentReceipt: formData.get("initialPaymentReceipt"),
   });
 
   if (!result.ok) {
