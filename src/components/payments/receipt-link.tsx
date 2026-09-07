@@ -1,11 +1,10 @@
 import { FileText } from "lucide-react";
 
 // `fileUrl` always comes from PaymentReceipt.fileUrl, which is only ever
-// written server-side (see receipt-storage.ts) as a relative
-// "/uploads/payment-receipts/<uuid>.<ext>" path -- never built from a
-// user-supplied filename or query param, so linking directly to it is
-// safe. Opens in a new tab: images render inline, PDFs open in the
-// browser's native viewer.
+// written server-side (see receipt-storage.ts) as the public Supabase
+// Storage URL for an uploaded file -- never built from a user-supplied
+// filename or query param, so linking directly to it is safe. Opens in a
+// new tab: images render inline, PDFs open in the browser's native viewer.
 export function ReceiptLink({ fileUrl }: { fileUrl: string }) {
   return (
     <a

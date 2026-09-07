@@ -1,26 +1,29 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
-// Generic local-disk receipt storage, shared by PaymentReceipt (payments
-// module), SaleReceipt (ventas module), and InvestmentReceipt/
-// InvestmentContract (inversiones module). All are the exact same kind of
-// artifact -- a small PDF/image attachment, validated and stored the same
-// way -- so all MIME/extension/size validation and disk I/O lives here
-// once; only the destination subfolder differs per `kind`, keyed below.
-// Files live under public/uploads/<kind>-receipts/ and are served directly
-// by Next.js as static assets -- callers only ever persist the relative
-// fileUrl this module returns, never the filesystem path or file bytes.
+// Generic receipt storage, shared by PaymentReceipt (payments module),
+// SaleReceipt (ventas module), and InvestmentReceipt/InvestmentContract
+// (inversiones module). All are the exact same kind of artifact -- a small
+// PDF/image attachment, validated and stored the same way -- so all
+// MIME/extension/size validation and upload I/O lives here once; only the
+// destination folder differs per `kind`, keyed below.
+//
+// Files are stored in the public "receipts" bucket in Supabase Storage
+// (not on local disk): this app runs on hosting where the filesystem is
+// ephemeral/not shared across instances, so anything written to local disk
+// at request time is never reliably servable afterwards. `fileUrl` is the
+// full public Supabase Storage URL -- callers only ever persist that URL,
+// never a filesystem path or the file bytes.
 
 export type ReceiptKind = "payment" | "sale" | "investment" | "investment-contract";
 
-const UPLOADS_ROOT = path.join(process.cwd(), "public", "uploads");
-const PUBLIC_ROOT = "/uploads/";
+const BUCKET = "receipts";
 
 // Existing PaymentReceipt/SaleReceipt rows already store fileUrl values
 // under these exact folder names -- this mapping must keep them so nothing
-// already on disk (or already referenced in the database) breaks.
+// already referenced in the database breaks.
 const RECEIPT_DIR: Record<ReceiptKind, string> = {
   payment: "payment-receipts",
   sale: "sale-receipts",
@@ -64,58 +67,63 @@ export function validateReceiptFile(file: File): ReceiptValidationError | null {
 }
 
 /**
- * Saves an already-validated receipt file to disk under a fresh,
- * unguessable name (never derived from the original filename) and returns
- * the relative public path plus the metadata to store on
- * PaymentReceipt/SaleReceipt. `kind` only picks the destination subfolder.
+ * Uploads an already-validated receipt file to Supabase Storage under a
+ * fresh, unguessable name (never derived from the original filename) and
+ * returns the public URL plus the metadata to store on
+ * PaymentReceipt/SaleReceipt. `kind` only picks the destination folder.
  */
 export async function saveReceiptFile(
   file: File,
   kind: ReceiptKind,
 ): Promise<{ fileUrl: string; fileName: string; fileType: string }> {
   const dirName = RECEIPT_DIR[kind];
-  const uploadDir = path.join(UPLOADS_ROOT, dirName);
   const ext = ALLOWED_TYPES[file.type]!.ext;
-  const filename = `${randomUUID()}.${ext}`;
+  const objectPath = `${dirName}/${randomUUID()}.${ext}`;
 
-  await mkdir(uploadDir, { recursive: true });
   const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(path.join(uploadDir, filename), buffer);
+  const { error } = await supabaseAdmin.storage.from(BUCKET).upload(objectPath, buffer, {
+    contentType: file.type,
+    upsert: false,
+  });
+  if (error) {
+    throw error;
+  }
+
+  const {
+    data: { publicUrl },
+  } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(objectPath);
 
   return {
-    fileUrl: `${PUBLIC_ROOT}${dirName}/${filename}`,
+    fileUrl: publicUrl,
     fileName: file.name,
     fileType: file.type,
   };
 }
 
 /**
- * Best-effort delete, used to clean up a receipt file already written to
- * disk when the surrounding registration ultimately fails (e.g. the
- * payment/sale transaction errors out after the file was saved). Only ever
- * deletes files that resolve inside public/uploads/<kind>-receipts/ --
- * anything else (a foreign URL, a crafted "../.." path) is silently
- * ignored. Failures never throw: losing the orphaned file must never mask
- * the original error.
+ * Best-effort delete, used to clean up a receipt file already uploaded when
+ * the surrounding registration ultimately fails (e.g. the payment/sale
+ * transaction errors out after the file was uploaded). Only ever deletes
+ * objects that resolve inside the "receipts" bucket's <kind>-receipts/
+ * folder -- anything else (a foreign URL) is silently ignored. Failures
+ * never throw: losing the orphaned file must never mask the original error.
  */
 export async function deleteReceiptFile(fileUrl: string | null | undefined, kind: ReceiptKind) {
   const dirName = RECEIPT_DIR[kind];
-  const uploadDir = path.join(UPLOADS_ROOT, dirName);
-  const publicPrefix = `${PUBLIC_ROOT}${dirName}/`;
+  const publicPrefix = `/storage/v1/object/public/${BUCKET}/${dirName}/`;
 
-  if (!fileUrl || !fileUrl.startsWith(publicPrefix)) {
+  if (!fileUrl) {
+    return;
+  }
+  const prefixIndex = fileUrl.indexOf(publicPrefix);
+  if (prefixIndex === -1) {
     return;
   }
 
-  const filename = path.basename(fileUrl);
-  const resolved = path.join(uploadDir, filename);
-
-  if (path.dirname(resolved) !== uploadDir) {
-    return;
-  }
+  const objectPath = fileUrl.slice(prefixIndex + `/storage/v1/object/public/${BUCKET}/`.length);
 
   try {
-    await unlink(resolved);
+    await supabaseAdmin.storage.from(BUCKET).remove([`${dirName}/${path.basename(objectPath)}`]);
   } catch {
     // Already gone or otherwise inaccessible -- not fatal.
   }
