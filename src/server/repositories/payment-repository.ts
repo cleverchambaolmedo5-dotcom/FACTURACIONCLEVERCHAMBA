@@ -5,6 +5,7 @@ import type {
   InstallmentStatus,
   PaymentMethod,
   PaymentValidationStatus,
+  SaleStatus,
 } from "@/generated/prisma/enums";
 
 // Pure data access for Installment/Payment. No auth/RBAC awareness lives
@@ -138,6 +139,31 @@ export async function createPaymentReceipt(db: Db, data: CreatePaymentReceiptDat
 
 export async function updateInstallmentStatus(db: Db, id: string, status: InstallmentStatus) {
   return db.installment.update({ where: { id }, data: { status } });
+}
+
+export type SaleForStatusRecompute = Awaited<ReturnType<typeof findSaleForStatusRecompute>>;
+
+/**
+ * Everything payment-service.ts#recomputeSaleStatus needs to derive a
+ * sale's status from its real payment ledger: the sale's own status/
+ * finalPrice, plus every payment amount+validationStatus across all of its
+ * installments (not just the one installment a given payment belongs to --
+ * a sale's status reflects its whole ledger).
+ */
+export async function findSaleForStatusRecompute(saleId: string, db: Db = prisma) {
+  return db.sale.findUnique({
+    where: { id: saleId },
+    select: {
+      id: true,
+      status: true,
+      finalPrice: true,
+      installments: { select: { payments: { select: { amount: true, validationStatus: true } } } },
+    },
+  });
+}
+
+export async function updateSaleStatus(db: Db, id: string, status: SaleStatus) {
+  return db.sale.update({ where: { id }, data: { status } });
 }
 
 const paymentDetailInclude = {

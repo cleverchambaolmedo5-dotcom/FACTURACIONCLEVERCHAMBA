@@ -39,9 +39,18 @@ export async function registerPaymentAction(
   // registerPaymentForUser) and never itself changes the installment's
   // approved balance -- revalidating here just refreshes the already-
   // correct numbers/status so /pagos and this installment's detail page
-  // don't serve stale cached data after the redirect below.
+  // don't serve stale cached data after the redirect below. /comprobantes
+  // and /cuotas read the exact same Payment/Installment rows (see
+  // payment-service.ts#listPendingPaymentsForUser and #listCuotasForUser)
+  // and must be revalidated too, mirroring approvePaymentAction/
+  // rejectPaymentAction in comprobantes/actions.ts -- otherwise a new
+  // PENDING_VALIDATION payment can fail to show up in "Comprobantes
+  // pendientes de validación" if either page was rendered and cached
+  // earlier in the same client session.
   revalidatePath("/pagos");
   revalidatePath(`/pagos/${installmentId}`);
+  revalidatePath("/comprobantes");
+  revalidatePath("/cuotas");
 
   // redirect() throws internally -- this only runs, and only reaches here,
   // once registerPaymentForUser has actually committed the Payment.

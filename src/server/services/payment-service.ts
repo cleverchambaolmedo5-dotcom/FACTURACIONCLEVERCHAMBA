@@ -5,6 +5,7 @@ import {
   PaymentMethod,
   PaymentValidationStatus,
   BankTransactionType,
+  SaleStatus,
 } from "@/generated/prisma/enums";
 import { Prisma } from "@/generated/prisma/client";
 import type { PublicUser } from "@/lib/auth/session";
@@ -97,6 +98,50 @@ export function computeInstallmentStatus(
   if (dueDate.getTime() < now.getTime()) return InstallmentStatus.OVERDUE;
   if (paidCents > 0) return InstallmentStatus.PARTIALLY_PAID;
   return InstallmentStatus.PENDING;
+}
+
+/**
+ * A sale's status only ever reflects its APPROVED-payments total against
+ * finalPrice -- the same "only APPROVED counts" rule as
+ * computeInstallmentStatus above. Never derived from due dates (a sale has
+ * no single due date of its own) and never manually set for these three
+ * values -- see recomputeSaleStatus, the only writer.
+ */
+export function computeSaleStatus(finalPriceCents: number, approvedCents: number): SaleStatus {
+  if (approvedCents >= finalPriceCents) return SaleStatus.PAID;
+  if (approvedCents > 0) return SaleStatus.PARTIALLY_PAID;
+  return SaleStatus.ACTIVE;
+}
+
+// A sale sitting in one of these statuses is owned by this recompute --
+// CANCELLED (no cancellation flow exists yet, but never resurrect one if it
+// ever lands) and OVERDUE (not yet computed for sales anywhere, reserved
+// for a future due-date-based rule like Installment's) are left untouched.
+const SALE_STATUSES_OWNED_BY_PAYMENT_RECOMPUTE: readonly SaleStatus[] = [
+  SaleStatus.ACTIVE,
+  SaleStatus.PARTIALLY_PAID,
+  SaleStatus.PAID,
+];
+
+/**
+ * Recomputes and persists one sale's status from its real payment ledger --
+ * called after any change to a sale's APPROVED total (today, only a
+ * payment approval; see approvePaymentForUser). Must run inside the same
+ * transaction as that change so the sale's status is never observed
+ * out-of-sync with the payments it's derived from.
+ */
+async function recomputeSaleStatus(tx: Prisma.TransactionClient, saleId: string): Promise<void> {
+  const sale = await paymentRepository.findSaleForStatusRecompute(saleId, tx);
+  if (!sale || !(SALE_STATUSES_OWNED_BY_PAYMENT_RECOMPUTE as string[]).includes(sale.status)) {
+    return;
+  }
+
+  const approvedCents = sumApprovedCents(sale.installments.flatMap((installment) => installment.payments));
+  const newStatus = computeSaleStatus(toCents(sale.finalPrice), approvedCents);
+
+  if (newStatus !== sale.status) {
+    await paymentRepository.updateSaleStatus(tx, saleId, newStatus);
+  }
 }
 
 type PaymentAmountAndStatus = {
@@ -780,6 +825,11 @@ export async function approvePaymentForUser(
             approvedAmount,
           );
         }
+
+        // --- Recompute the sale's own status from its full payment ledger
+        // now that this approval changed its APPROVED total -- see the
+        // module design note and recomputeSaleStatus above.
+        await recomputeSaleStatus(tx, sale.id);
       });
 
       return { ok: true };
