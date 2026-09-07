@@ -1,4 +1,4 @@
-import { DollarSign, ClipboardList, CheckCircle2, AlertTriangle, ShoppingCart, ShieldCheck } from "lucide-react";
+import { DollarSign, ClipboardList, CheckCircle2, AlertTriangle, ShoppingCart, ShieldCheck, Wallet, Hourglass } from "lucide-react";
 import type { PublicUser } from "@/lib/auth/session";
 import type { BankAccountSummaryItem, FinancialSalesDashboardData } from "@/server/services/dashboard-service";
 import { DashboardStatCard } from "./dashboard-stat-card";
@@ -52,6 +52,21 @@ export function SalesAccountantDashboard({
           label="Total vendido"
           value={currencyFormatter.format(data.stats.totalSoldCents / 100)}
           tone="success"
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <DashboardStatCard
+          icon={Wallet}
+          label="Total cobrado"
+          value={currencyFormatter.format(data.financialSummary.collectedCents / 100)}
+          tone="success"
+        />
+        <DashboardStatCard
+          icon={Hourglass}
+          label="Total por cobrar"
+          value={currencyFormatter.format(data.financialSummary.pendingToCollectCents / 100)}
+          tone="warning"
         />
       </div>
 

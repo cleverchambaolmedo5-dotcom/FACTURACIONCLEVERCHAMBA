@@ -63,13 +63,13 @@ export function SalesAdminDashboard({
       <div className="grid gap-4 sm:grid-cols-2">
         <DashboardStatCard
           icon={Wallet}
-          label="Dinero cobrado"
+          label="Total cobrado"
           value={currencyFormatter.format(data.financialSummary.collectedCents / 100)}
           tone="success"
         />
         <DashboardStatCard
           icon={Hourglass}
-          label="Pendiente por cobrar"
+          label="Total por cobrar"
           value={currencyFormatter.format(data.financialSummary.pendingToCollectCents / 100)}
           tone="warning"
         />
