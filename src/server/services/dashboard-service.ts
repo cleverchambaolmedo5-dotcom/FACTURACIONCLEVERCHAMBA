@@ -9,10 +9,15 @@ import type {
 } from "@/server/repositories/investment-repository";
 import { listSalesForUser } from "@/server/services/sale-service";
 import type { SaleListItem } from "@/server/repositories/sale-repository";
-import { listPendingPaymentsForUser, listInstallmentsForUser } from "@/server/services/payment-service";
+import {
+  listPendingPaymentsForUser,
+  listInstallmentsForUser,
+  listRejectedPaymentsNeedingCorrectionForUser,
+} from "@/server/services/payment-service";
 import type {
   DecoratedPaymentListRow,
   DecoratedInstallmentListRow,
+  RejectedPaymentAlert,
 } from "@/server/services/payment-service";
 import { listBankAccountsForUser } from "@/server/services/bank-account-service";
 import type { BankAccountListItem } from "@/server/repositories/bank-account-repository";
@@ -137,9 +142,24 @@ async function getSalesDashboardData(user: PublicUser): Promise<SalesDashboardDa
   };
 }
 
-/** SELLER dashboard: their own sales only, same shape as the financial view -- Sale amounts are never field-restricted for SELLER (unlike Inversiones), so there is no separate "seller" data shape to define here. */
-export async function getSellerSalesDashboardData(user: PublicUser): Promise<SalesDashboardData> {
-  return getSalesDashboardData(user);
+export type SellerSalesDashboardData = SalesDashboardData & {
+  // Payments Contabilidad rejected whose installment still needs a
+  // corrected re-registration -- see
+  // payment-service.ts#listRejectedPaymentsNeedingCorrectionForUser. Never
+  // shown on the ADMIN/ACCOUNTANT dashboards (SalesDashboardData itself is
+  // unchanged for them), only added here for the seller-facing "requiere
+  // corrección" alert.
+  rejectedPayments: RejectedPaymentAlert[];
+};
+
+/** SELLER dashboard: their own sales only, same shape as the financial view -- Sale amounts are never field-restricted for SELLER (unlike Inversiones), so there is no separate "seller" data shape to define here, beyond the rejected-payments alert below. */
+export async function getSellerSalesDashboardData(user: PublicUser): Promise<SellerSalesDashboardData> {
+  const [base, rejectedPayments] = await Promise.all([
+    getSalesDashboardData(user),
+    listRejectedPaymentsNeedingCorrectionForUser(user),
+  ]);
+
+  return { ...base, rejectedPayments };
 }
 
 export type FinancialSummary = {

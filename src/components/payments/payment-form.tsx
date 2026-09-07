@@ -16,6 +16,13 @@ export type PaymentFormAction = (
   formData: FormData,
 ) => Promise<PaymentFormState>;
 
+export type PaymentFormBankAccount = {
+  id: string;
+  bankName: string;
+  alias: string;
+  accountNumber: string;
+};
+
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
 
 function fieldClass(hasError: boolean) {
@@ -26,14 +33,24 @@ function fieldClass(hasError: boolean) {
   }`;
 }
 
+/** Masks everything but the last 4 characters -- mirrors sale-form.tsx's own maskAccountNumber. */
+function maskAccountNumber(accountNumber: string): string {
+  const visible = accountNumber.slice(-4);
+  const hiddenLength = accountNumber.length - visible.length;
+  if (hiddenLength <= 0) return accountNumber;
+  return "•".repeat(hiddenLength) + visible;
+}
+
 export function PaymentForm({
   action,
   balanceCents,
   defaultPaymentDate,
+  bankAccounts,
 }: {
   action: PaymentFormAction;
   balanceCents: number;
   defaultPaymentDate: string;
+  bankAccounts: PaymentFormBankAccount[];
 }) {
   const [state, formAction, pending] = useActionState<PaymentFormState, FormData>(action, undefined);
   const errors = state && !state.ok ? state.errors : undefined;
@@ -123,6 +140,33 @@ export function PaymentForm({
           </select>
           {errors?.method && <p className="text-sm text-error">{errors.method}</p>}
         </div>
+      </div>
+
+      <div className="space-y-1">
+        <label htmlFor="bankAccountId" className="text-sm font-medium text-foreground">
+          Cuenta bancaria donde se recibió el pago
+        </label>
+        <select
+          id="bankAccountId"
+          name="bankAccountId"
+          defaultValue=""
+          disabled={pending}
+          className={fieldClass(!!errors?.bankAccountId)}
+        >
+          <option value="" disabled>
+            Selecciona una cuenta bancaria…
+          </option>
+          {bankAccounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.bankName} — {account.alias} ({maskAccountNumber(account.accountNumber)})
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Cuenta donde el cliente realizó la transferencia o el depósito. El saldo de esta cuenta
+          solo se actualiza cuando Contabilidad aprueba el pago.
+        </p>
+        {errors?.bankAccountId && <p className="text-sm text-error">{errors.bankAccountId}</p>}
       </div>
 
       <div className="space-y-1">

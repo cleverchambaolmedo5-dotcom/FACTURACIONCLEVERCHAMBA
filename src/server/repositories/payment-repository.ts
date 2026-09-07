@@ -30,7 +30,22 @@ const installmentListInclude = {
       seller: { select: { id: true, name: true } },
     },
   },
-  payments: { select: { amount: true, validationStatus: true } },
+  // id/rejectionReason/validatedAt/createdAt beyond amount/validationStatus
+  // are only read by payment-service.ts#findRejectedPaymentNeedingCorrection
+  // (the seller-dashboard "requiere corrección" alert) -- every existing
+  // consumer of this row (computeInstallmentTotals, sumApprovedCents, ...)
+  // only ever destructures amount/validationStatus, so widening this select
+  // is purely additive and changes no existing calculation.
+  payments: {
+    select: {
+      id: true,
+      amount: true,
+      validationStatus: true,
+      rejectionReason: true,
+      validatedAt: true,
+      createdAt: true,
+    },
+  },
 } as const;
 
 export type InstallmentListRow = Awaited<ReturnType<typeof listInstallments>>[number];
@@ -103,6 +118,16 @@ export async function findInstallmentById(id: string, db: Db = prisma) {
 
 export type CreatePaymentData = {
   installmentId: string;
+  // The bank account the customer paid into, as selected by whoever
+  // registered this payment. payment-service.ts#registerPaymentForUser (the
+  // manual "Registrar pago" flow) always passes one -- it's required there.
+  // Optional here only because sale-repository.ts#createSaleWithInstallments
+  // also calls this function, for its separate initial-payment-at-sale-
+  // creation flow, which doesn't collect a bank account and is left
+  // untouched -- those payments simply keep a null bankAccountId, and
+  // approvePaymentForUser falls back to the sale's own bankAccountId for
+  // them.
+  bankAccountId?: string;
   amount: string;
   paymentDate: Date;
   method: PaymentMethod;
@@ -115,6 +140,7 @@ export async function createPayment(db: Db, data: CreatePaymentData) {
   return db.payment.create({
     data: {
       installmentId: data.installmentId,
+      bankAccountId: data.bankAccountId,
       amount: data.amount,
       paymentDate: data.paymentDate,
       method: data.method,

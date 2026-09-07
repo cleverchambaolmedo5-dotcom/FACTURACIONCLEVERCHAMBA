@@ -26,6 +26,7 @@ export async function registerPaymentAction(
     reference: formData.get("reference"),
     notes: formData.get("notes"),
     receipt: formData.get("receipt"),
+    bankAccountId: formData.get("bankAccountId"),
   });
 
   if (!result.ok) {

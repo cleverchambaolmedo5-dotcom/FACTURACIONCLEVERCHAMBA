@@ -1,6 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getInstallmentForUser } from "@/server/services/payment-service";
+import { AlertTriangle } from "lucide-react";
+import {
+  getInstallmentForUser,
+  listBankAccountsForPaymentForm,
+  findRejectedPaymentNeedingCorrection,
+} from "@/server/services/payment-service";
 import { requireModuleAccess } from "@/lib/auth/guards";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { InstallmentStatus } from "@/generated/prisma/enums";
@@ -12,6 +17,7 @@ import { siteConfig } from "@/config/site";
 export const metadata: Metadata = { title: `Detalle de cuota · ${siteConfig.name}` };
 
 const dateFormatter = new Intl.DateTimeFormat("es-EC", { dateStyle: "long", timeZone: "UTC" });
+const rejectedAtFormatter = new Intl.DateTimeFormat("es-EC", { dateStyle: "medium", timeZone: "UTC" });
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
 
 const STATUS_TONE: Record<InstallmentStatus, StatusTone> = {
@@ -48,6 +54,16 @@ export default async function CuotaDetallePage({
 
   const boundAction = registerPaymentAction.bind(null, installment.id);
   const today = new Date().toISOString().slice(0, 10);
+  const bankAccounts = await listBankAccountsForPaymentForm();
+
+  // Same "still-open rejection" rule as the seller dashboard alert (see
+  // payment-service.ts#findRejectedPaymentNeedingCorrection) -- null once a
+  // newer payment supersedes it or the cuota is already fully paid, so this
+  // banner and the dashboard alert never disagree about a given cuota.
+  const rejectedPayment = findRejectedPaymentNeedingCorrection(
+    installment.payments,
+    installment.balanceCents,
+  );
 
   return (
     <div className="flex flex-1 flex-col gap-6">
@@ -65,6 +81,32 @@ export default async function CuotaDetallePage({
           {STATUS_LABELS[installment.effectiveStatus]}
         </StatusBadge>
       </div>
+
+      {rejectedPayment && (
+        <div className="flex flex-col gap-2 rounded-lg border border-error/30 bg-error/5 p-4">
+          <div className="flex items-center gap-2 text-error">
+            <AlertTriangle className="size-5 shrink-0" aria-hidden />
+            <p className="text-sm font-semibold">Estado: Pago rechazado</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Motivo del rechazo
+            </p>
+            <p className="text-sm text-foreground">{rejectedPayment.rejectionReason || "—"}</p>
+          </div>
+          {rejectedPayment.validatedAt && (
+            <p className="text-xs text-muted-foreground">
+              Rechazado el {rejectedAtFormatter.format(rejectedPayment.validatedAt)}
+            </p>
+          )}
+          <a
+            href="#registrar-pago"
+            className="inline-flex w-fit items-center gap-1.5 rounded-md bg-error px-3 py-1.5 text-sm font-medium text-white transition-colors hover:opacity-90"
+          >
+            Registrar nuevamente el pago
+          </a>
+        </div>
+      )}
 
       <div className="grid gap-4 rounded-lg border border-border bg-surface p-6 sm:grid-cols-2 lg:grid-cols-5">
         <div>
@@ -100,9 +142,16 @@ export default async function CuotaDetallePage({
       </div>
 
       <div className="space-y-3">
-        <h3 className="text-sm font-semibold text-foreground">Registrar pago</h3>
+        <h3 className="text-sm font-semibold text-foreground">
+          {rejectedPayment ? "Corregir pago" : "Registrar pago"}
+        </h3>
         {installment.balanceCents > 0 ? (
-          <PaymentForm action={boundAction} balanceCents={installment.balanceCents} defaultPaymentDate={today} />
+          <PaymentForm
+            action={boundAction}
+            balanceCents={installment.balanceCents}
+            defaultPaymentDate={today}
+            bankAccounts={bankAccounts}
+          />
         ) : (
           <p className="rounded-lg border border-border bg-black/[0.02] px-4 py-3 text-sm text-muted-foreground">
             Esta cuota ya está completamente pagada.

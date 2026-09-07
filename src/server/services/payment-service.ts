@@ -38,17 +38,23 @@ import {
 // Comprobantes approve/reject workflow. A payment only counts toward an
 // installment's paid total (and therefore its balance/effective status)
 // once it is APPROVED -- PENDING_VALIDATION and REJECTED payments are
-// shown for visibility but never reduce the balance. Payment.bankAccountId
-// itself is tied to a not-yet-built "which account did *this specific*
-// transfer land in" flow and is left unset regardless of payment method.
+// shown for visibility but never reduce the balance.
 //
-// Separately, Sale.bankAccountId (the account selected when the sale was
-// created) is what actually gets credited: the moment a payment is
-// APPROVED here (see approvePaymentForUser), a BankTransaction is created
-// for exactly the approved payment's amount and BankAccount.balance is
-// incremented by that same amount, atomically in the same transaction. A
-// sale created before Sale.bankAccountId existed simply has no account to
-// credit -- approval still succeeds, it just never touches any balance.
+// Payment.bankAccountId records which specific account the customer's
+// transfer/deposit landed in for *this* payment, chosen by whoever
+// registers it via the manual "Registrar pago" flow (registerPaymentForUser)
+// -- required there, never trusted/derived automatically. Registering a
+// payment never touches any balance by itself, regardless of which account
+// was picked: the moment a payment is APPROVED here (see
+// approvePaymentForUser), a BankTransaction is created for exactly the
+// approved payment's amount and BankAccount.balance is incremented by that
+// same amount, atomically in the same transaction, against
+// Payment.bankAccountId when it's set. Older payments with no
+// bankAccountId of their own (created before this field was required, or
+// through sale-service.ts's separate initial-payment-at-sale-creation
+// path, which still doesn't collect one) fall back to Sale.bankAccountId
+// (the account selected when the sale was created) -- and if neither is
+// set, approval still succeeds, it just never touches any balance.
 
 const PAYMENT_METHOD_VALUES = Object.values(PaymentMethod) as string[];
 
@@ -213,6 +219,41 @@ export function computeInstallmentTotals<
   };
 }
 
+export type PaymentNeedingCorrection = PaymentAmountAndStatus & {
+  id: string;
+  rejectionReason: string | null;
+  validatedAt: Date | null;
+  createdAt: Date;
+};
+
+/**
+ * The installment's most-recently-*registered* payment (by createdAt, not
+ * paymentDate -- a corrected re-registration can carry an earlier payment
+ * date than the rejection it's fixing), if that payment is REJECTED and the
+ * installment still has a balance to collect. Returns null once either
+ * condition stops holding -- a newer PENDING_VALIDATION/APPROVED payment
+ * already supersedes the rejection (the seller re-registered), or the
+ * installment is already fully paid through an earlier payment (nothing
+ * left to correct) -- so a resolved rejection never keeps showing up here.
+ *
+ * A REJECTED payment never advances effectiveStatus/balanceCents on its own
+ * (see the module design note above), so without this a rejected
+ * installment looks identical to an ordinary still-pending one to the
+ * seller -- both the Cuotas dashboard alert
+ * (listRejectedPaymentsNeedingCorrectionForUser) and the cuota detail page
+ * use this exact same rule so they never disagree.
+ */
+export function findRejectedPaymentNeedingCorrection<T extends PaymentNeedingCorrection>(
+  payments: T[],
+  balanceCents: number,
+): T | null {
+  if (balanceCents <= 0 || payments.length === 0) {
+    return null;
+  }
+  const latest = [...payments].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+  return latest.validationStatus === PaymentValidationStatus.REJECTED ? latest : null;
+}
+
 export type DecoratedInstallmentListRow = InstallmentWithTotals<InstallmentListRow>;
 
 /**
@@ -256,6 +297,56 @@ export async function listInstallmentsForUser(
 
   const status = isValidInstallmentStatus(filters.status) ? filters.status : undefined;
   return status ? decorated.filter((row) => row.effectiveStatus === status) : decorated;
+}
+
+export type RejectedPaymentAlert = {
+  paymentId: string;
+  installmentId: string;
+  saleId: string;
+  customerName: string;
+  productName: string;
+  installmentNumber: number;
+  amountCents: number;
+  rejectionReason: string | null;
+  rejectedAt: Date | null;
+};
+
+/**
+ * "Pagos que requieren corrección" -- the seller dashboard alert. Reuses
+ * the exact same Installment rows Pagos/Cuotas already fetch
+ * (listInstallmentsForUser above), so SELLER's own-sales-only scoping is
+ * inherited for free rather than re-implemented; ADMIN/ACCOUNTANT can also
+ * call this (e.g. filtered to one seller) since nothing here is SELLER-only
+ * by itself, though today only the seller dashboard does.
+ * findRejectedPaymentNeedingCorrection owns *which* installments qualify
+ * (still-open rejections only, never a resolved one) -- this only maps
+ * qualifying rows to the shape the dashboard needs.
+ */
+export async function listRejectedPaymentsNeedingCorrectionForUser(
+  user: PublicUser,
+  filters: { sellerId?: string } = {},
+): Promise<RejectedPaymentAlert[]> {
+  const rows = await listInstallmentsForUser(user, filters);
+
+  const alerts: RejectedPaymentAlert[] = [];
+  for (const row of rows) {
+    const rejected = findRejectedPaymentNeedingCorrection(row.payments, row.balanceCents);
+    if (!rejected) continue;
+
+    alerts.push({
+      paymentId: rejected.id,
+      installmentId: row.id,
+      saleId: row.sale.id,
+      customerName: row.sale.customer.fullName,
+      productName: row.sale.product.name,
+      installmentNumber: row.installmentNumber,
+      amountCents: toCents(rejected.amount),
+      rejectionReason: rejected.rejectionReason,
+      rejectedAt: rejected.validatedAt,
+    });
+  }
+
+  return alerts.sort((a, b) => (b.rejectedAt?.getTime() ?? 0) - (a.rejectedAt?.getTime() ?? 0));
 }
 
 export type DecoratedInstallmentDetail = InstallmentWithTotals<NonNullable<InstallmentDetail>>;
@@ -439,8 +530,18 @@ export function listSellersForPaymentFilters() {
   return customerRepository.listActiveSellers();
 }
 
+/**
+ * Active bank accounts, for the "Registrar pago" form's mandatory "cuenta
+ * bancaria donde se recibió el pago" selector -- mirrors
+ * sale-service.ts#listBankAccountsForSaleForm. Available to every role that
+ * can reach that form (the "pagos" module), not just ADMIN/ACCOUNTANT.
+ */
+export function listBankAccountsForPaymentForm() {
+  return bankAccountRepository.listActiveBankAccounts();
+}
+
 export type PaymentFieldErrors = Partial<
-  Record<"amount" | "paymentDate" | "method" | "reference" | "notes" | "receipt", string>
+  Record<"amount" | "paymentDate" | "method" | "reference" | "notes" | "receipt" | "bankAccountId", string>
 >;
 
 export type RegisterPaymentResult =
@@ -453,6 +554,12 @@ export type RawPaymentInput = {
   method?: FormDataEntryValue | null;
   reference?: FormDataEntryValue | null;
   notes?: FormDataEntryValue | null;
+  // Mandatory -- see the validation in registerPaymentForUser below. Only
+  // this manual per-installment payment flow requires it; sale-service.ts's
+  // separate initial-payment-at-sale-creation flow is untouched and keeps
+  // creating payments with no bank account of their own (see the module
+  // design note above).
+  bankAccountId?: FormDataEntryValue | null;
   // Mandatory -- a Payment can never be created without a receipt attached,
   // see the validation in registerPaymentForUser below.
   receipt?: FormDataEntryValue | null;
@@ -521,6 +628,25 @@ export async function registerPaymentForUser(
     errors.method = "Selecciona un método de pago válido.";
   }
 
+  // --- Bank account: the account where the customer's transfer/deposit
+  // actually landed, for this specific payment. Mandatory and re-checked
+  // against the database (must exist and be active), mirroring
+  // sale-service.ts's own bankAccountId validation -- never trusted from
+  // the client beyond the id it submits. Saved on the Payment but never
+  // used to touch any balance here; the balance only moves once this
+  // payment is approved (see approvePaymentForUser below).
+  const bankAccountIdRaw = str(raw.bankAccountId);
+  let bankAccount: Awaited<ReturnType<typeof bankAccountRepository.findActiveBankAccountById>> =
+    null;
+  if (!bankAccountIdRaw || !isValidUuid(bankAccountIdRaw)) {
+    errors.bankAccountId = "Selecciona una cuenta bancaria válida.";
+  } else {
+    bankAccount = await bankAccountRepository.findActiveBankAccountById(bankAccountIdRaw);
+    if (!bankAccount) {
+      errors.bankAccountId = "Selecciona una cuenta bancaria activa válida.";
+    }
+  }
+
   // --- Reference / notes: optional free text.
   const reference = str(raw.reference) || undefined;
   const notes = str(raw.notes) || undefined;
@@ -545,10 +671,16 @@ export async function registerPaymentForUser(
     }
   }
 
-  if (Object.keys(errors).length > 0 || !paymentDate || !isValidPaymentMethod(methodRaw)) {
+  if (
+    Object.keys(errors).length > 0 ||
+    !paymentDate ||
+    !isValidPaymentMethod(methodRaw) ||
+    !bankAccount
+  ) {
     return { ok: false, errors };
   }
   const method: PaymentMethod = methodRaw;
+  const paymentBankAccountId = bankAccount.id;
 
   // The file is written to disk once, before the transaction retry loop
   // (its content never depends on the transaction outcome) -- on any
@@ -596,6 +728,7 @@ export async function registerPaymentForUser(
 
         const payment = await paymentRepository.createPayment(tx, {
           installmentId,
+          bankAccountId: paymentBankAccountId,
           amount: centsToDecimalString(amountCents),
           paymentDate,
           method,
@@ -788,12 +921,17 @@ export async function approvePaymentForUser(
         );
         await paymentRepository.updateInstallmentStatus(tx, payment.installmentId, newStatus);
 
-        // --- Credit the sale's bank account, only now that the payment is
+        // --- Credit the bank account, only now that the payment is
         // definitively approved, and only for exactly this payment's real
         // amount (never the sale's total/finalPrice) -- see the module
-        // design note above.
+        // design note above. Payment.bankAccountId (the account the seller
+        // selected when registering *this* payment) always wins when set;
+        // Sale.bankAccountId is only a fallback for payments that predate
+        // that selection (or came through the initial-payment-at-sale-
+        // creation flow, which doesn't collect one).
         const sale = payment.installment.sale;
-        if (sale.bankAccountId) {
+        const targetBankAccountId = payment.bankAccountId ?? sale.bankAccountId;
+        if (targetBankAccountId) {
           // Defense in depth: BankTransaction.paymentId is `@unique` in the
           // schema, so a duplicate insert below would fail on its own --
           // this pre-check just turns that into a clear early exit instead
@@ -812,7 +950,7 @@ export async function approvePaymentForUser(
 
           const approvedAmount = centsToDecimalString(thisAmountCents);
           await bankAccountRepository.createBankTransaction(tx, {
-            bankAccountId: sale.bankAccountId,
+            bankAccountId: targetBankAccountId,
             saleId: sale.id,
             paymentId,
             amount: approvedAmount,
@@ -821,7 +959,7 @@ export async function approvePaymentForUser(
           });
           await bankAccountRepository.incrementBankAccountBalance(
             tx,
-            sale.bankAccountId,
+            targetBankAccountId,
             approvedAmount,
           );
         }

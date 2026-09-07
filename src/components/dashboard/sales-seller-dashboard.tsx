@@ -1,9 +1,10 @@
 import { DollarSign, ClipboardList, CheckCircle2, AlertTriangle, Plus, ShoppingCart } from "lucide-react";
 import type { PublicUser } from "@/lib/auth/session";
-import type { SalesDashboardData } from "@/server/services/dashboard-service";
+import type { SellerSalesDashboardData } from "@/server/services/dashboard-service";
 import { DashboardStatCard } from "./dashboard-stat-card";
 import { DashboardSection } from "./dashboard-section";
 import { QuickActions } from "./quick-actions";
+import { RejectedPaymentsAlert } from "./rejected-payments-alert";
 import { SaleTable } from "@/components/sales/sale-table";
 
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
@@ -18,7 +19,7 @@ export function SalesSellerDashboard({
   data,
 }: {
   user: PublicUser;
-  data: SalesDashboardData;
+  data: SellerSalesDashboardData;
 }) {
   return (
     <div className="flex flex-1 flex-col gap-6">
@@ -26,6 +27,8 @@ export function SalesSellerDashboard({
         <h2 className="text-lg font-semibold text-foreground">Hola, {user.name}</h2>
         <p className="text-sm text-muted-foreground">Resumen de las ventas que has registrado.</p>
       </div>
+
+      <RejectedPaymentsAlert payments={data.rejectedPayments} />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <DashboardStatCard icon={ShoppingCart} label="Ventas registradas" value={String(data.stats.totalCount)} />
