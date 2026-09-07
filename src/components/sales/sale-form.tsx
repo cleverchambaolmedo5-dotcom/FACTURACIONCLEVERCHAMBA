@@ -132,8 +132,13 @@ export function SaleForm({
   const [initialPaymentReceiptClientError, setInitialPaymentReceiptClientError] = useState<
     string | null
   >(null);
+  // Merges errors.receipt in too: while hasInitialPayment is checked, the
+  // single file the user attaches here is mirrored into the hidden
+  // `receipt` input (see handleInitialPaymentReceiptChange) and backs both
+  // records server-side, so a rejection of either one must surface here --
+  // the separate "Adjuntar comprobante" field isn't rendered in that case.
   const initialPaymentReceiptError =
-    errors?.initialPaymentReceipt ?? initialPaymentReceiptClientError ?? undefined;
+    errors?.initialPaymentReceipt ?? errors?.receipt ?? initialPaymentReceiptClientError ?? undefined;
 
   function handleToggleInitialPayment(checked: boolean) {
     setHasInitialPayment(checked);
@@ -143,39 +148,59 @@ export function SaleForm({
     }
   }
 
+  /**
+   * Mirrors the single comprobante file into the hidden `receipt` input
+   * (via DataTransfer) whenever "ya pagó la Cuota 1" is checked -- the user
+   * uploads one file, but it ends up backing both the SaleReceipt and the
+   * initial Payment's PaymentReceipt server-side, exactly as if they'd
+   * uploaded it twice into the two separate fields this replaces.
+   */
+  function handleInitialPaymentReceiptChange(file: File | null) {
+    setInitialPaymentReceiptClientError(null);
+    if (file && receiptInputRef.current) {
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
+      receiptInputRef.current.files = transfer.files;
+    }
+  }
+
   // Belt-and-suspenders: the actual, unbypassable rule lives in
   // createSaleForUser (server-side) -- this only blocks the obvious cases
   // (no file chosen, cuotas that don't add up to the final price) without
   // a round trip.
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    const hasFile = !!receiptInputRef.current?.files?.length;
-    if (!hasFile) {
-      event.preventDefault();
-      setReceiptClientError("Debes adjuntar un comprobante para registrar la venta.");
-      return;
-    }
-    setReceiptClientError(null);
-
-    if (installmentsMismatchFinalPrice) {
-      event.preventDefault();
-      setInstallmentsTotalClientError(
-        installmentsExceedFinalPrice
-          ? "La suma de las cuotas no puede superar el precio final de la venta."
-          : "La suma de las cuotas debe ser igual al precio final de la venta.",
-      );
-      return;
-    }
-    setInstallmentsTotalClientError(null);
-
     if (hasInitialPayment) {
       const hasInitialPaymentFile = !!initialPaymentReceiptRef.current?.files?.length;
       if (!hasInitialPaymentFile) {
         event.preventDefault();
-        setInitialPaymentReceiptClientError("Debes adjuntar un comprobante del pago inicial.");
+        setInitialPaymentReceiptClientError("Debes adjuntar un comprobante de pago.");
         return;
       }
       setInitialPaymentReceiptClientError(null);
+      setReceiptClientError(null);
+    } else {
+      const hasFile = !!receiptInputRef.current?.files?.length;
+      if (!hasFile) {
+        event.preventDefault();
+        setReceiptClientError("Debes adjuntar un comprobante para registrar la venta.");
+        return;
+      }
+      setReceiptClientError(null);
     }
+
+    const installmentsTotalMessage = installmentsExceedFinalPrice
+      ? "La suma de las cuotas no puede superar el precio final de la venta."
+      : installmentsHaveZeroAmount
+        ? "Cada cuota debe ser mayor a cero."
+        : installmentsMismatchFinalPrice
+          ? "La suma de las cuotas debe ser igual al precio final de la venta."
+          : null;
+    if (installmentsTotalMessage) {
+      event.preventDefault();
+      setInstallmentsTotalClientError(installmentsTotalMessage);
+      return;
+    }
+    setInstallmentsTotalClientError(null);
   }
 
   // Client-side state only drives the live preview below -- the actual
@@ -215,22 +240,46 @@ export function SaleForm({
   const remainingBalanceCents = Math.max(finalPriceCents - totalInstallmentsCents, 0);
   const installmentsExceedFinalPrice = totalInstallmentsCents > finalPriceCents;
   const installmentsMismatchFinalPrice = totalInstallmentsCents !== finalPriceCents;
+  const installmentsHaveZeroAmount = installmentAmountCents.some((cents) => cents <= 0);
   const installmentsTotalError =
     errors?.installmentsTotal ?? installmentsTotalClientError ?? undefined;
 
-  /** Refreshes only the untouched cuota amounts to an even split of `newFinalPriceCents` across `count` -- a hand-edited amount is always left as-is. */
-  function syncUntouchedAmounts(
+  /**
+   * Recomputes every untouched cuota so that, together, they cover exactly
+   * what's left after subtracting the hand-edited (touched) cuotas from
+   * `newFinalPriceCents` -- e.g. with 2 cuotas and $300 typed into cuota 1,
+   * cuota 2 becomes `newFinalPriceCents - 300` automatically, updating live
+   * as cuota 1 changes. A touched cuota's own value is always left exactly
+   * as the user entered it. The remaining balance is floor-split across the
+   * untouched cuotas, with the rounding remainder absorbed by the last
+   * untouched one -- the same rule `distributeCentsPreview` already uses
+   * for the very first suggestion.
+   */
+  function computeUntouchedDistribution(
     previousAmounts: string[],
     previousTouched: boolean[],
     newFinalPriceCents: number,
     count: number,
   ): string[] {
-    const suggestions = distributeCentsPreview(newFinalPriceCents, count);
-    return Array.from({ length: count }, (_, index) =>
-      previousTouched[index]
-        ? (previousAmounts[index] ?? centsToAmountInput(suggestions[index]))
-        : centsToAmountInput(suggestions[index]),
-    );
+    const untouchedIndices: number[] = [];
+    let touchedSumCents = 0;
+    for (let index = 0; index < count; index += 1) {
+      if (previousTouched[index]) {
+        touchedSumCents += Math.max(toCents(Number(previousAmounts[index]) || 0), 0);
+      } else {
+        untouchedIndices.push(index);
+      }
+    }
+
+    const result = Array.from({ length: count }, (_, index) => previousAmounts[index] ?? "0.00");
+    if (untouchedIndices.length === 0) return result;
+
+    const remainingCents = Math.max(newFinalPriceCents - touchedSumCents, 0);
+    const shares = distributeCentsPreview(remainingCents, untouchedIndices.length);
+    untouchedIndices.forEach((index, shareIndex) => {
+      result[index] = centsToAmountInput(shares[shareIndex]);
+    });
+    return result;
   }
 
   function handleInstallmentsCountChange(count: number) {
@@ -247,14 +296,12 @@ export function SaleForm({
       while (next.length < count) next.push(false);
       return next;
     });
+    const nextAmountsTouched = amountsTouched.slice(0, count);
+    while (nextAmountsTouched.length < count) nextAmountsTouched.push(false);
     setInstallmentAmounts((previous) =>
-      syncUntouchedAmounts(previous, amountsTouched, finalPriceCents, count),
+      computeUntouchedDistribution(previous, nextAmountsTouched, finalPriceCents, count),
     );
-    setAmountsTouched((previous) => {
-      const next = previous.slice(0, count);
-      while (next.length < count) next.push(false);
-      return next;
-    });
+    setAmountsTouched(nextAmountsTouched);
   }
 
   function handleSaleDateChange(value: string) {
@@ -276,7 +323,7 @@ export function SaleForm({
     const newOriginalPrice = products.find((product) => product.id === value)?.officialPrice ?? 0;
     const newFinalPriceCents = Math.max(toCents(newOriginalPrice) - toCents(discountValue), 0);
     setInstallmentAmounts((previous) =>
-      syncUntouchedAmounts(previous, amountsTouched, newFinalPriceCents, installmentsCount),
+      computeUntouchedDistribution(previous, amountsTouched, newFinalPriceCents, installmentsCount),
     );
   }
 
@@ -285,13 +332,17 @@ export function SaleForm({
     const newDiscountValue = Number(value) || 0;
     const newFinalPriceCents = Math.max(toCents(originalPrice) - toCents(newDiscountValue), 0);
     setInstallmentAmounts((previous) =>
-      syncUntouchedAmounts(previous, amountsTouched, newFinalPriceCents, installmentsCount),
+      computeUntouchedDistribution(previous, amountsTouched, newFinalPriceCents, installmentsCount),
     );
   }
 
   function handleInstallmentAmountChange(index: number, value: string) {
-    setInstallmentAmounts((previous) => previous.map((amount, i) => (i === index ? value : amount)));
-    setAmountsTouched((previous) => previous.map((flag, i) => (i === index ? true : flag)));
+    const nextTouched = amountsTouched.map((flag, i) => (i === index ? true : flag));
+    setInstallmentAmounts((previous) => {
+      const updated = previous.map((amount, i) => (i === index ? value : amount));
+      return computeUntouchedDistribution(updated, nextTouched, finalPriceCents, installmentsCount);
+    });
+    setAmountsTouched(nextTouched);
   }
 
   return (
@@ -663,7 +714,7 @@ export function SaleForm({
                 htmlFor="initialPaymentReceipt"
                 className="text-sm font-medium text-foreground"
               >
-                Comprobante del pago inicial *
+                Comprobante de pago *
               </label>
               <input
                 ref={initialPaymentReceiptRef}
@@ -672,9 +723,16 @@ export function SaleForm({
                 type="file"
                 accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
                 disabled={pending}
-                onChange={() => setInitialPaymentReceiptClientError(null)}
+                onChange={(event) =>
+                  handleInitialPaymentReceiptChange(event.target.files?.[0] ?? null)
+                }
                 className={fieldClass(!!initialPaymentReceiptError)}
               />
+              {/* Mirrors the same file into the sale's own `receipt` field
+                  (see handleInitialPaymentReceiptChange) so it backs both
+                  the SaleReceipt and this initial Payment's PaymentReceipt
+                  without asking the user to upload it twice. */}
+              <input ref={receiptInputRef} type="file" name="receipt" hidden disabled={pending} />
               <p className="text-xs text-muted-foreground">PDF, JPG, PNG o WEBP. Máximo 5 MB.</p>
               {initialPaymentReceiptError && (
                 <p className="text-sm text-error">{initialPaymentReceiptError}</p>
@@ -682,31 +740,33 @@ export function SaleForm({
             </div>
 
             <p className="text-xs text-muted-foreground">
-              Este pago quedará pendiente de validación en Contabilidad → Comprobantes, igual que
-              cualquier otro pago registrado.
+              Este comprobante se usará tanto para el pago inicial como para el registro de la
+              venta, y quedará pendiente de validación en Contabilidad → Comprobantes.
             </p>
           </div>
         )}
       </div>
 
-      <div className="space-y-1">
-        <label htmlFor="receipt" className="text-sm font-medium text-foreground">
-          Adjuntar comprobante *
-        </label>
-        <input
-          ref={receiptInputRef}
-          id="receipt"
-          name="receipt"
-          type="file"
-          accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
-          required
-          disabled={pending}
-          onChange={() => setReceiptClientError(null)}
-          className={fieldClass(!!receiptError)}
-        />
-        <p className="text-xs text-muted-foreground">PDF, JPG, PNG o WEBP. Máximo 5 MB.</p>
-        {receiptError && <p className="text-sm text-error">{receiptError}</p>}
-      </div>
+      {!hasInitialPayment && (
+        <div className="space-y-1">
+          <label htmlFor="receipt" className="text-sm font-medium text-foreground">
+            Adjuntar comprobante *
+          </label>
+          <input
+            ref={receiptInputRef}
+            id="receipt"
+            name="receipt"
+            type="file"
+            accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
+            required
+            disabled={pending}
+            onChange={() => setReceiptClientError(null)}
+            className={fieldClass(!!receiptError)}
+          />
+          <p className="text-xs text-muted-foreground">PDF, JPG, PNG o WEBP. Máximo 5 MB.</p>
+          {receiptError && <p className="text-sm text-error">{receiptError}</p>}
+        </div>
+      )}
 
       {formError && <p className="text-sm text-error">{formError}</p>}
 

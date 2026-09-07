@@ -435,8 +435,8 @@ export async function createSaleForUser(
       const amountValue = Number(rawAmount);
       if (!rawAmount || !Number.isFinite(amountValue)) {
         amountErrors[index] = "El monto de la cuota es obligatorio.";
-      } else if (amountValue < 0) {
-        amountErrors[index] = "El monto de la cuota no puede ser negativo.";
+      } else if (amountValue <= 0) {
+        amountErrors[index] = "El monto de la cuota debe ser mayor a cero.";
       } else {
         installmentAmountCents[index] = toCents(amountValue);
       }
