@@ -165,7 +165,8 @@ export async function incrementBankAccountBalance(db: Db, id: string, amount: st
   });
 }
 
-const bankTransactionListInclude = {
+const bankTransactionWithAccountInclude = {
+  bankAccount: { select: { id: true, bankName: true, alias: true } },
   sale: {
     select: {
       id: true,
@@ -175,13 +176,32 @@ const bankTransactionListInclude = {
   },
 } as const;
 
-export type BankTransactionListItem = Awaited<ReturnType<typeof listBankAccountTransactions>>[number];
+export type BankTransactionWithAccount = Awaited<
+  ReturnType<typeof listBankTransactionsForBalanceCalc>
+>[number];
 
-/** Movement history for the account detail page, most recent first. */
-export async function listBankAccountTransactions(bankAccountId: string) {
+/**
+ * Every BankTransaction for one account (or every account, when
+ * `bankAccountId` is omitted), oldest first -- the input
+ * bank-account-service.ts#listBankTransactionsForUser needs to compute a
+ * running balance per account before applying any date/type filter. Never
+ * filtered by date/type here: a filtered fetch would make the running
+ * balance wrong for any transaction after the first excluded one.
+ */
+export async function listBankTransactionsForBalanceCalc(bankAccountId?: string) {
   return prisma.bankTransaction.findMany({
-    where: { bankAccountId },
-    include: bankTransactionListInclude,
-    orderBy: { createdAt: "desc" },
+    where: bankAccountId ? { bankAccountId } : {},
+    include: bankTransactionWithAccountInclude,
+    orderBy: [{ bankAccountId: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+  });
+}
+
+export type BankAccountFilterOption = Awaited<ReturnType<typeof listBankAccountsForFilter>>[number];
+
+/** Every bank account (active and inactive), for the "cuenta bancaria" filter selector -- an inactive account can still have historical movements worth filtering to. */
+export async function listBankAccountsForFilter() {
+  return prisma.bankAccount.findMany({
+    select: { id: true, bankName: true, alias: true, active: true },
+    orderBy: { bankName: "asc" },
   });
 }

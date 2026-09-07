@@ -165,9 +165,10 @@ export type OverdueInstallmentItem = {
  * (payment-service.ts) to decide an installment's real balance, so a
  * PENDING_VALIDATION or REJECTED payment can never inflate it. "Pendiente
  * por cobrar" is the complementary balanceCents for those same
- * installments. Because every installment's amount is an exact slice of
- * its sale's finalPrice (see sale-service.ts#distributeCents),
- * collectedCents + pendingToCollectCents always equals totalSoldCents --
+ * installments. Because the sum of a sale's installment amounts is always
+ * required to equal its finalPrice exactly (enforced in
+ * sale-service.ts#createSaleForUser), collectedCents + pendingToCollectCents
+ * always equals totalSoldCents --
  * this never re-sums sale totals on its own (which would double count
  * against the payment ledger), it only partitions the same ledger already
  * used for the Comprobantes/Cuotas modules.

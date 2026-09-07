@@ -108,8 +108,14 @@ function sumPaymentsCents(payments: { amount: Prisma.Decimal | number | string }
   return payments.reduce((sum, payment) => sum + toCents(payment.amount), 0);
 }
 
-/** Only APPROVED payments ever count toward a paid/balance calculation -- see the design note above. */
-function sumApprovedCents(payments: PaymentAmountAndStatus[]): number {
+/**
+ * Only APPROVED payments ever count toward a paid/balance calculation --
+ * see the design note above. Exported so other modules that need the
+ * exact same "money actually collected" figure (e.g.
+ * sale-service.ts#listSalesForExportForUser, for the Ventas Excel export)
+ * reuse this instead of re-implementing the APPROVED-only filter.
+ */
+export function sumApprovedCents(payments: PaymentAmountAndStatus[]): number {
   return sumPaymentsCents(
     payments.filter((payment) => payment.validationStatus === PaymentValidationStatus.APPROVED),
   );

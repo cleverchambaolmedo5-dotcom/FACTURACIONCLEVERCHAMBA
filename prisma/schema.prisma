@@ -158,7 +158,11 @@ model Session {
 model Customer {
   id             String   @id @default(uuid()) @db.Uuid
   fullName       String
-  identification String   @unique
+  // Optional -- not every customer has a cédula/RUC on hand at the time of
+  // registration. Still unique when present: Postgres allows any number of
+  // NULLs alongside a unique constraint, so existing customers with a
+  // cédula are never affected.
+  identification String?  @unique
   phone          String
   email          String?
   city           String?

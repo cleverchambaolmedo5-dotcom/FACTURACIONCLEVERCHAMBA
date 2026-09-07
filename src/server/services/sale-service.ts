@@ -7,6 +7,7 @@ import * as customerRepository from "@/server/repositories/customer-repository";
 import * as bankAccountRepository from "@/server/repositories/bank-account-repository";
 import * as customerService from "@/server/services/customer-service";
 import type { CustomerActionResult, RawCustomerInput } from "@/server/services/customer-service";
+import { sumApprovedCents } from "@/server/services/payment-service";
 import {
   MAX_RECEIPT_BYTES,
   deleteReceiptFile,
@@ -33,7 +34,11 @@ export type SaleFieldErrors = Partial<
     | "installments"
     | "sellerId"
     | "receipt"
-    | "bankAccountId",
+    | "bankAccountId"
+    // Aggregate mismatch between the sum of installment amounts and the
+    // sale's final price -- not tied to any single cuota, hence a flat
+    // message rather than a per-index array like installmentAmounts below.
+    | "installmentsTotal",
     string
   >
 > & {
@@ -41,6 +46,9 @@ export type SaleFieldErrors = Partial<
   // flat message -- the form needs to point at exactly which cuota's
   // date is invalid.
   installmentDates?: (string | undefined)[];
+  // Same per-index shape as installmentDates, for each cuota's manually
+  // entered amount.
+  installmentAmounts?: (string | undefined)[];
 };
 
 export type SaleActionResult =
@@ -60,6 +68,10 @@ export type RawSaleInput = {
   // One value per installment, in installment order (e.g. FormData's
   // getAll("installmentDueDates")).
   installmentDueDates?: FormDataEntryValue[];
+  // One manually-entered monetary amount per installment, in installment
+  // order (e.g. FormData's getAll("installmentAmounts")). Replaces the
+  // old server-computed even split -- see the validation below.
+  installmentAmounts?: FormDataEntryValue[];
   // Mandatory -- a Sale can never be created without a receipt attached,
   // see the validation in createSaleForUser below.
   receipt?: FormDataEntryValue | null;
@@ -89,26 +101,33 @@ function centsToDecimalString(cents: number): string {
   return (cents / 100).toFixed(2);
 }
 
-/**
- * Splits `totalCents` into `count` installment amounts (in cents) that sum
- * exactly to `totalCents`: the first `count - 1` installments each get the
- * floor share, and the last one absorbs whatever rounding remainder is
- * left over (e.g. 10000 / 3 -> 3333, 3333, 3334). Cents are never lost or
- * invented.
- */
-function distributeCents(totalCents: number, count: number): number[] {
-  const base = Math.floor(totalCents / count);
-  const remainder = totalCents - base * count;
-  const amounts = Array<number>(count).fill(base);
-  amounts[count - 1] += remainder;
-  return amounts;
-}
-
 function isValidSaleStatus(value: string | undefined): value is SaleStatus {
   return !!value && (Object.values(SaleStatus) as string[]).includes(value);
 }
 
-/** SELLER sees only their own sales; ADMIN/ACCOUNTANT see all. */
+/**
+ * Resolves the effective `sellerId` scope for a sales query: SELLER is
+ * always forced to their own id (a submitted sellerId is ignored); ADMIN/
+ * ACCOUNTANT both have "all" access to Ventas (see rbac.ts) and may
+ * additionally narrow the query down to one seller via `filters.sellerId`.
+ * Shared by listSalesForUser and listSalesForExportForUser so both apply
+ * the exact same scoping rule.
+ */
+function resolveSaleSellerScope(user: PublicUser, filters: { sellerId?: string }): string | undefined {
+  if (user.role === UserRole.SELLER) {
+    return user.id;
+  }
+  if (
+    (user.role === UserRole.ADMIN || user.role === UserRole.ACCOUNTANT) &&
+    filters.sellerId &&
+    isValidUuid(filters.sellerId)
+  ) {
+    return filters.sellerId;
+  }
+  return undefined;
+}
+
+/** SELLER sees only their own sales; ADMIN/ACCOUNTANT see all (optionally narrowed to one seller via `filters.sellerId`). */
 export function listSalesForUser(
   user: PublicUser,
   filters: {
@@ -117,9 +136,10 @@ export function listSalesForUser(
     status?: string;
     dateFrom?: string;
     dateTo?: string;
+    sellerId?: string;
   },
 ) {
-  const sellerId = user.role === UserRole.SELLER ? user.id : undefined;
+  const sellerId = resolveSaleSellerScope(user, filters);
   const status = isValidSaleStatus(filters.status) ? filters.status : undefined;
   const dateFrom = filters.dateFrom ? (parseDateOnly(filters.dateFrom) ?? undefined) : undefined;
   const dateTo = filters.dateTo ? (parseDateOnly(filters.dateTo) ?? undefined) : undefined;
@@ -214,7 +234,7 @@ export async function createCustomerForSaleForm(
   return customerService.createCustomerForUser(user, raw);
 }
 
-/** ADMIN-only: the SELLER options for the "vendedor" selector and the quick-create customer modal. */
+/** The SELLER options for the "vendedor" selector (sale form, quick-create customer modal, and the ADMIN/ACCOUNTANT "vendedor" filter on the Ventas listing/export). */
 export function listSellersForSaleForm() {
   return customerRepository.listActiveSellers();
 }
@@ -373,6 +393,46 @@ export async function createSaleForUser(
     }
   }
 
+  // --- Installment amounts: one manually-entered amount per installment,
+  // replacing the old server-computed even split. Each must be a valid,
+  // non-negative monetary value; client-side totals are never trusted --
+  // only re-validated and summed here. Their sum must land exactly on the
+  // true finalPriceCents computed above from the database-backed product
+  // price and discount (never the client's own displayed total), so every
+  // downstream ledger figure that assumes installments == finalPrice
+  // (e.g. dashboard-service.ts's collectedCents + pendingToCollectCents)
+  // keeps holding.
+  const installmentAmountCents: number[] = [];
+  if (hasValidInstallmentsCount) {
+    const amountErrors: (string | undefined)[] = [];
+    const rawAmounts = (raw.installmentAmounts ?? []).map(str);
+
+    for (let index = 0; index < installmentsCount; index += 1) {
+      const rawAmount = rawAmounts[index] ?? "";
+      const amountValue = Number(rawAmount);
+      if (!rawAmount || !Number.isFinite(amountValue)) {
+        amountErrors[index] = "El monto de la cuota es obligatorio.";
+      } else if (amountValue < 0) {
+        amountErrors[index] = "El monto de la cuota no puede ser negativo.";
+      } else {
+        installmentAmountCents[index] = toCents(amountValue);
+      }
+    }
+
+    if (amountErrors.some((message) => message !== undefined)) {
+      errors.installmentAmounts = amountErrors;
+    } else if (product && installmentAmountCents.length === installmentsCount) {
+      const totalAmountCents = installmentAmountCents.reduce((sum, cents) => sum + cents, 0);
+      const trueFinalPriceCents = originalPriceCents - discountCents;
+      if (totalAmountCents > trueFinalPriceCents) {
+        errors.installmentsTotal =
+          "La suma de las cuotas no puede superar el precio final de la venta.";
+      } else if (totalAmountCents < trueFinalPriceCents) {
+        errors.installmentsTotal = "La suma de las cuotas debe ser igual al precio final de la venta.";
+      }
+    }
+  }
+
   // --- Receipt: mandatory. An empty file input still arrives as a
   // zero-byte File with an empty name -- treat that as "no file selected"
   // and reject it, the same as a missing field entirely. This is the only
@@ -400,17 +460,20 @@ export async function createSaleForUser(
     !sellerId ||
     !hasValidInstallmentsCount ||
     installmentDueDates.length !== installmentsCount ||
+    installmentAmountCents.length !== installmentsCount ||
     !receiptFile
   ) {
     return { ok: false, errors };
   }
 
-  // --- Final price and installment distribution: computed server-side
-  // from cents so rounding never loses or invents a cent across
-  // installments. Due dates come from the validated user input above --
-  // never recalculated automatically here.
+  // --- Final price and installment amounts: the final price is computed
+  // server-side from cents (never trusted from the client); the amounts
+  // themselves are the user-entered, per-cuota values validated above,
+  // whose sum was already confirmed to equal finalPriceCents exactly. Due
+  // dates come from the validated user input above -- never recalculated
+  // automatically here.
   const finalPriceCents = originalPriceCents - discountCents;
-  const amounts = distributeCents(finalPriceCents, installmentsCount);
+  const amounts = installmentAmountCents;
   const installments = amounts.map((cents, index) => ({
     installmentNumber: index + 1,
     amount: centsToDecimalString(cents),
@@ -457,4 +520,80 @@ export async function createSaleForUser(
     await deleteReceiptFile(savedReceipt.fileUrl, "sale");
     return { ok: false, formError: "No se pudo crear la venta. Intenta nuevamente." };
   }
+}
+
+// ---------------------------------------------------------------------
+// Exportar ventas a Excel: ADMIN/ACCOUNTANT only -- a SELLER can already
+// see their own sales in the Ventas listing, but the accounting export
+// (with paid/pending totals) is reserved for the roles that actually
+// reconcile that data, mirroring the /cuentas-bancarias export.
+// ---------------------------------------------------------------------
+
+export type SaleExportRow = {
+  id: string;
+  saleDate: Date;
+  customerName: string;
+  productName: string;
+  sellerName: string;
+  finalPriceCents: number;
+  // Sum of APPROVED payments only, across every installment of the sale --
+  // the same figure payment-service.ts's computeInstallmentTotals uses
+  // everywhere else, via the shared sumApprovedCents helper. A
+  // PENDING_VALIDATION or REJECTED payment never counts as "pagado" here.
+  paidCents: number;
+  balanceCents: number;
+  status: SaleStatus;
+};
+
+/**
+ * Sale-level rows for the Ventas Excel export, decorated with real paid/
+ * pending totals -- ADMIN/ACCOUNTANT only. Reuses the exact same
+ * sellerId/product/status/date scoping as listSalesForUser (via
+ * resolveSaleSellerScope) so the exported file always matches whatever the
+ * caller could already see on the Ventas listing page.
+ */
+export async function listSalesForExportForUser(
+  user: PublicUser,
+  filters: {
+    search?: string;
+    productId?: string;
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    sellerId?: string;
+  },
+): Promise<SaleExportRow[]> {
+  if (user.role !== UserRole.ADMIN && user.role !== UserRole.ACCOUNTANT) {
+    return [];
+  }
+
+  const sellerId = resolveSaleSellerScope(user, filters);
+  const status = isValidSaleStatus(filters.status) ? filters.status : undefined;
+  const dateFrom = filters.dateFrom ? (parseDateOnly(filters.dateFrom) ?? undefined) : undefined;
+  const dateTo = filters.dateTo ? (parseDateOnly(filters.dateTo) ?? undefined) : undefined;
+
+  const rows = await saleRepository.listSalesForExport({
+    sellerId,
+    search: filters.search,
+    productId: filters.productId && isValidUuid(filters.productId) ? filters.productId : undefined,
+    status,
+    dateFrom,
+    dateTo,
+  });
+
+  return rows.map((sale) => {
+    const finalPriceCents = toCents(Number(sale.finalPrice));
+    const paidCents = sumApprovedCents(sale.installments.flatMap((installment) => installment.payments));
+    return {
+      id: sale.id,
+      saleDate: sale.saleDate,
+      customerName: sale.customer.fullName,
+      productName: sale.product.name,
+      sellerName: sale.seller.name,
+      finalPriceCents,
+      paidCents,
+      balanceCents: finalPriceCents - paidCents,
+      status: sale.status,
+    };
+  });
 }

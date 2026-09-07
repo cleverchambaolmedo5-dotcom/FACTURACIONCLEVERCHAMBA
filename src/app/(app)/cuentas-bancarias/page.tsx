@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, ArrowLeftRight } from "lucide-react";
 import { UserRole } from "@/generated/prisma/enums";
 import { requireModuleAccess } from "@/lib/auth/guards";
 import {
@@ -50,15 +50,24 @@ export default async function CuentasBancariasPage({
             Cuentas bancarias utilizadas para recibir pagos.
           </p>
         </div>
-        {canCreate && (
+        <div className="flex flex-wrap items-center gap-2">
           <Link
-            href="/cuentas-bancarias/nuevo"
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark"
+            href="/cuentas-bancarias/movimientos"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-black/[0.02]"
           >
-            <Plus className="size-4" aria-hidden />
-            Nueva cuenta bancaria
+            <ArrowLeftRight className="size-4" aria-hidden />
+            Movimientos
           </Link>
-        )}
+          {canCreate && (
+            <Link
+              href="/cuentas-bancarias/nuevo"
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark"
+            >
+              <Plus className="size-4" aria-hidden />
+              Nueva cuenta bancaria
+            </Link>
+          )}
+        </div>
       </div>
 
       <form action="/cuentas-bancarias" method="GET" className="flex flex-col gap-3">

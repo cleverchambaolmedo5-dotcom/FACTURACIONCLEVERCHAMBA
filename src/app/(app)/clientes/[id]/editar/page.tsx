@@ -55,7 +55,7 @@ export default async function EditarClientePage({
         submitLabel="Guardar cambios"
         defaults={{
           fullName: customer.fullName,
-          identification: customer.identification,
+          identification: customer.identification ?? "",
           phone: customer.phone,
           email: customer.email ?? "",
           country: customer.country,

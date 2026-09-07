@@ -29,6 +29,7 @@ export async function createSaleAction(
     discount: formData.get("discount"),
     installments: formData.get("installments"),
     installmentDueDates: formData.getAll("installmentDueDates"),
+    installmentAmounts: formData.getAll("installmentAmounts"),
     sellerId: formData.get("sellerId"),
     bankAccountId: formData.get("bankAccountId"),
     receipt: formData.get("receipt"),

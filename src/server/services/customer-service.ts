@@ -80,7 +80,9 @@ function validateCommonFields(raw: RawCustomerInput) {
 
   const errors: CustomerFieldErrors = {};
   if (!fullName) errors.fullName = "El nombre completo es obligatorio.";
-  if (!identification) errors.identification = "La identificación es obligatoria.";
+  // Identification (cédula/RUC) is optional -- a customer can be
+  // registered and saved without one; see Customer.identification in
+  // schema.prisma.
   if (!phone) errors.phone = "El teléfono es obligatorio.";
   if (!country) errors.country = "El país es obligatorio.";
   if (email && !isValidEmail(email)) {
@@ -147,7 +149,7 @@ export async function createCustomerForUser(
   try {
     const customer = await customerRepository.createCustomer({
       fullName,
-      identification,
+      identification: identification || null,
       phone,
       email: email || null,
       country,
@@ -259,7 +261,7 @@ export async function updateCustomerForUser(
   try {
     await customerRepository.updateCustomer(id, {
       fullName,
-      identification,
+      identification: identification || null,
       phone,
       email: email || null,
       country,

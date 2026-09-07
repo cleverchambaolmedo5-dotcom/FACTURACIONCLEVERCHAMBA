@@ -1,5 +1,6 @@
 import "server-only";
-import { UserRole } from "@/generated/prisma/enums";
+import { UserRole, BankTransactionType } from "@/generated/prisma/enums";
+import type { Prisma } from "@/generated/prisma/client";
 import type { PublicUser } from "@/lib/auth/session";
 import { isValidUuid } from "@/lib/validation";
 import * as bankAccountRepository from "@/server/repositories/bank-account-repository";
@@ -88,31 +89,104 @@ export async function getBankAccountForUser(actingUser: PublicUser, id: string) 
   return bankAccountRepository.findBankAccountById(id);
 }
 
-export type BankAccountDetailForUser = {
-  account: NonNullable<Awaited<ReturnType<typeof bankAccountRepository.findBankAccountById>>>;
-  transactions: bankAccountRepository.BankTransactionListItem[];
+// ---------------------------------------------------------------------
+// Movimientos: cross-account listing with filters, for the /cuentas-
+// bancarias/movimientos page and the Excel export -- ADMIN/ACCOUNTANT only,
+// mirroring canRead above.
+// ---------------------------------------------------------------------
+
+/** Mirrors payment-service.ts/sale-service.ts's own copy -- parses a "YYYY-MM-DD" <input type="date"> value as UTC midnight. */
+function parseDateOnly(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const [, y, m, d] = match;
+  const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** End of the UTC calendar day for `date` -- unlike Sale/Payment dates (stored as pure UTC-midnight calendar days), BankTransaction.createdAt is a real timestamp, so a "hasta" filter needs the day's last millisecond, not its first. */
+function endOfUtcDay(date: Date): Date {
+  return new Date(date.getTime() + 24 * 60 * 60 * 1000 - 1);
+}
+
+function toCents(amount: number | string | Prisma.Decimal): number {
+  return Math.round(Number(amount) * 100);
+}
+
+function isValidBankTransactionType(value: string | undefined): value is BankTransactionType {
+  return !!value && (Object.values(BankTransactionType) as string[]).includes(value);
+}
+
+export type BankTransactionFilters = {
+  bankAccountId?: string;
+  type?: string;
+  dateFrom?: string;
+  dateTo?: string;
+};
+
+export type DecoratedBankTransaction = bankAccountRepository.BankTransactionWithAccount & {
+  balanceAfterCents: number;
 };
 
 /**
- * Account data (including its current balance) together with its full
- * movement history, most recent first, for the /cuentas-bancarias/[id]
- * detail page -- ADMIN/ACCOUNTANT only, mirroring getBankAccountForUser.
+ * Lists BankTransaction rows across every account the user can see
+ * (ADMIN/ACCOUNTANT only -- SELLER gets an empty list, mirroring
+ * listBankAccountsForUser), decorated with `balanceAfterCents`: the
+ * account's running balance immediately after this movement.
+ *
+ * The running balance is computed from that account's *entire* unfiltered
+ * history (see listBankTransactionsForBalanceCalc) before `type`/date
+ * filters are applied -- BankAccount.balance is only ever built up by
+ * these same transactions (see schema.prisma), so replaying them in order
+ * from zero reproduces the real balance at every point in time. Filtering
+ * first and only then summing would silently produce a wrong running
+ * balance for any account with a movement outside the selected window.
  */
-export async function getBankAccountDetailForUser(
+export async function listBankTransactionsForUser(
   actingUser: PublicUser,
-  id: string,
-): Promise<BankAccountDetailForUser | null> {
-  if (!canRead(actingUser.role) || !isValidUuid(id)) {
-    return null;
+  filters: BankTransactionFilters,
+): Promise<DecoratedBankTransaction[]> {
+  if (!canRead(actingUser.role)) {
+    return [];
   }
 
-  const account = await bankAccountRepository.findBankAccountById(id);
-  if (!account) {
-    return null;
-  }
+  const bankAccountId =
+    filters.bankAccountId && isValidUuid(filters.bankAccountId) ? filters.bankAccountId : undefined;
 
-  const transactions = await bankAccountRepository.listBankAccountTransactions(id);
-  return { account, transactions };
+  const all = await bankAccountRepository.listBankTransactionsForBalanceCalc(bankAccountId);
+
+  const runningByAccount = new Map<string, number>();
+  const decorated: DecoratedBankTransaction[] = all.map((transaction) => {
+    const previous = runningByAccount.get(transaction.bankAccountId) ?? 0;
+    const delta = toCents(transaction.amount) * (transaction.type === "INCOME" ? 1 : -1);
+    const next = previous + delta;
+    runningByAccount.set(transaction.bankAccountId, next);
+    return { ...transaction, balanceAfterCents: next };
+  });
+
+  const type = isValidBankTransactionType(filters.type) ? filters.type : undefined;
+  const dateFrom = filters.dateFrom ? (parseDateOnly(filters.dateFrom) ?? undefined) : undefined;
+  const dateToRaw = filters.dateTo ? (parseDateOnly(filters.dateTo) ?? undefined) : undefined;
+  const dateTo = dateToRaw ? endOfUtcDay(dateToRaw) : undefined;
+
+  const filtered = decorated.filter((transaction) => {
+    if (type && transaction.type !== type) return false;
+    if (dateFrom && transaction.createdAt.getTime() < dateFrom.getTime()) return false;
+    if (dateTo && transaction.createdAt.getTime() > dateTo.getTime()) return false;
+    return true;
+  });
+
+  return filtered.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+/** Every bank account, for the "cuenta bancaria" filter selector -- ADMIN/ACCOUNTANT only, mirroring canRead above. */
+export function listBankAccountsForFilterForUser(
+  actingUser: PublicUser,
+): Promise<bankAccountRepository.BankAccountFilterOption[]> {
+  if (!canRead(actingUser.role)) {
+    return Promise.resolve([]);
+  }
+  return bankAccountRepository.listBankAccountsForFilter();
 }
 
 function validateFields(raw: RawBankAccountInput) {

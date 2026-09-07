@@ -4,8 +4,13 @@ import { notFound } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { UserRole } from "@/generated/prisma/enums";
 import { requireModuleAccess } from "@/lib/auth/guards";
-import { getBankAccountDetailForUser } from "@/server/services/bank-account-service";
+import {
+  getBankAccountForUser,
+  listBankTransactionsForUser,
+} from "@/server/services/bank-account-service";
 import { BankAccountStatusBadge } from "@/components/bank-accounts/bank-account-status-badge";
+import { BankTransactionFilters } from "@/components/bank-accounts/bank-transaction-filters";
+import { ExportExcelLink } from "@/components/ui/export-excel-link";
 import { siteConfig } from "@/config/site";
 
 export const metadata: Metadata = { title: `Detalle de cuenta bancaria · ${siteConfig.name}` };
@@ -27,18 +32,37 @@ function maskAccountNumber(accountNumber: string): string {
 // /cuentas-bancarias/[id]/editar screen, ADMIN-only, linked from here.
 export default async function CuentaBancariaDetallePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ type?: string; dateFrom?: string; dateTo?: string }>;
 }) {
   const user = await requireModuleAccess("cuentas-bancarias");
   const { id } = await params;
+  const { type, dateFrom, dateTo } = await searchParams;
 
-  const detail = await getBankAccountDetailForUser(user, id);
-  if (!detail) {
+  const account = await getBankAccountForUser(user, id);
+  if (!account) {
     notFound();
   }
-  const { account, transactions } = detail;
+
+  // listBankTransactionsForUser scopes to this account and computes each
+  // row's running balance from the account's full, unfiltered history --
+  // see the design note on that function (bank-account-service.ts).
+  const transactions = await listBankTransactionsForUser(user, {
+    bankAccountId: id,
+    type,
+    dateFrom,
+    dateTo,
+  });
   const canManage = user.role === UserRole.ADMIN;
+  const hasFilters = !!(type || dateFrom || dateTo);
+
+  const exportParams = new URLSearchParams({ bankAccountId: id });
+  if (type) exportParams.set("type", type);
+  if (dateFrom) exportParams.set("dateFrom", dateFrom);
+  if (dateTo) exportParams.set("dateTo", dateTo);
+  const exportHref = `/cuentas-bancarias/movimientos/export?${exportParams.toString()}`;
 
   return (
     <div className="flex flex-1 flex-col gap-6">
@@ -89,16 +113,29 @@ export default async function CuentaBancariaDetallePage({
       </div>
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">Movimientos</h3>
-          <span className="text-xs text-muted-foreground">
-            {transactions.length} {transactions.length === 1 ? "movimiento" : "movimientos"}
-          </span>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Movimientos</h3>
+            <span className="text-xs text-muted-foreground">
+              {transactions.length} {transactions.length === 1 ? "movimiento" : "movimientos"}
+            </span>
+          </div>
+          <ExportExcelLink href={exportHref} />
         </div>
+
+        <form
+          action={`/cuentas-bancarias/${account.id}`}
+          method="GET"
+          className="flex flex-col gap-3"
+        >
+          <BankTransactionFilters defaultType={type} defaultDateFrom={dateFrom} defaultDateTo={dateTo} />
+        </form>
 
         {transactions.length === 0 ? (
           <p className="rounded-lg border border-border bg-black/[0.02] px-4 py-3 text-sm text-muted-foreground">
-            Esta cuenta todavía no tiene movimientos registrados.
+            {hasFilters
+              ? "No se encontraron movimientos con los filtros seleccionados."
+              : "Esta cuenta todavía no tiene movimientos registrados."}
           </p>
         ) : (
           <div className="overflow-hidden rounded-lg border border-border bg-surface">
@@ -110,6 +147,7 @@ export default async function CuentaBancariaDetallePage({
                     <th scope="col" className="px-4 py-3">Descripción</th>
                     <th scope="col" className="px-4 py-3">Tipo</th>
                     <th scope="col" className="px-4 py-3 text-right">Monto</th>
+                    <th scope="col" className="px-4 py-3 text-right">Saldo</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -136,6 +174,9 @@ export default async function CuentaBancariaDetallePage({
                         >
                           {isIncome ? "+" : "-"}
                           {currencyFormatter.format(Number(transaction.amount))}
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold text-foreground">
+                          {currencyFormatter.format(transaction.balanceAfterCents / 100)}
                         </td>
                       </tr>
                     );

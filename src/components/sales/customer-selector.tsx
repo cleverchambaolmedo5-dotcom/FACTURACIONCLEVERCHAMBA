@@ -13,7 +13,8 @@ export type CustomerSearchResult = {
   id: string;
   fullName: string;
   phone: string;
-  identification: string;
+  // Optional -- see Customer.identification in schema.prisma.
+  identification: string | null;
 };
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -124,7 +125,7 @@ export function CustomerSelector({
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-foreground">{selected.fullName}</p>
             <p className="truncate text-xs text-muted-foreground">
-              {selected.identification} · {selected.phone}
+              {selected.identification || "—"} · {selected.phone}
             </p>
           </div>
           <button
@@ -181,7 +182,7 @@ export function CustomerSelector({
                   >
                     <span className="font-medium text-foreground">{customer.fullName}</span>
                     <span className="text-xs text-muted-foreground">
-                      {customer.identification} · {customer.phone}
+                      {customer.identification || "—"} · {customer.phone}
                     </span>
                   </button>
                 </li>

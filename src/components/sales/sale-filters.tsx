@@ -15,16 +15,21 @@ const selectClass =
 // SaleSearch for why (both live inside one shared GET form).
 export function SaleFilters({
   products,
+  sellers,
   defaultProductId,
   defaultStatus,
   defaultDateFrom,
   defaultDateTo,
+  defaultSellerId,
 }: {
   products: { id: string; name: string }[];
+  // Only passed (non-undefined) for ADMIN/ACCOUNTANT -- see ventas/page.tsx.
+  sellers?: { id: string; name: string }[];
   defaultProductId?: string;
   defaultStatus?: string;
   defaultDateFrom?: string;
   defaultDateTo?: string;
+  defaultSellerId?: string;
 }) {
   return (
     <div className="flex flex-wrap items-end gap-3">
@@ -55,6 +60,22 @@ export function SaleFilters({
           ))}
         </select>
       </div>
+
+      {sellers && (
+        <div className="space-y-1">
+          <label htmlFor="sellerId" className="text-xs font-medium text-muted-foreground">
+            Vendedor
+          </label>
+          <select id="sellerId" name="sellerId" defaultValue={defaultSellerId ?? ""} className={selectClass}>
+            <option value="">Todos</option>
+            {sellers.map((seller) => (
+              <option key={seller.id} value={seller.id}>
+                {seller.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="space-y-1">
         <label htmlFor="dateFrom" className="text-xs font-medium text-muted-foreground">

@@ -15,7 +15,8 @@ export type CreatedCustomer = {
   id: string;
   fullName: string;
   phone: string;
-  identification: string;
+  // Optional -- see Customer.identification in schema.prisma.
+  identification: string | null;
 };
 
 function fieldClass(hasError: boolean) {
@@ -61,7 +62,7 @@ export function CustomerCreateModal({
 
   useEffect(() => {
     if (state?.ok) {
-      onCreated({ id: state.id, fullName, phone, identification });
+      onCreated({ id: state.id, fullName, phone, identification: identification || null });
     }
     // Only react to the action's result changing -- fullName/phone/
     // identification are read at that moment, not tracked as triggers.
@@ -122,7 +123,8 @@ export function CustomerCreateModal({
 
           <div className="space-y-1">
             <label htmlFor="modal-identification" className="text-sm font-medium text-foreground">
-              Identificación (cédula / RUC)
+              Identificación (cédula / RUC){" "}
+              <span className="font-normal text-muted-foreground">(opcional)</span>
             </label>
             <input
               id="modal-identification"

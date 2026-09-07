@@ -61,6 +61,61 @@ export async function listSales(params: {
   });
 }
 
+const saleExportSelect = {
+  id: true,
+  saleDate: true,
+  finalPrice: true,
+  status: true,
+  customer: { select: { id: true, fullName: true } },
+  product: { select: { id: true, name: true } },
+  seller: { select: { id: true, name: true } },
+  // `payments` (not just `id`) so sale-service.ts#listSalesForExportForUser
+  // can compute "Total pagado"/"Saldo pendiente" from APPROVED payments
+  // only, reusing payment-service.ts#sumApprovedCents -- mirrors
+  // saleDetailInclude.installments below.
+  installments: { select: { payments: { select: { amount: true, validationStatus: true } } } },
+} as const;
+
+export type SaleExportRow = Awaited<ReturnType<typeof listSalesForExport>>[number];
+
+/** Same filters/scoping as listSales, but with each installment's payments included for the Ventas Excel export -- kept separate from listSales so the plain Ventas listing query never pays for that extra join. */
+export async function listSalesForExport(params: {
+  sellerId?: string;
+  search?: string;
+  productId?: string;
+  status?: SaleStatus;
+  dateFrom?: Date;
+  dateTo?: Date;
+}) {
+  const search = params.search?.trim();
+
+  return prisma.sale.findMany({
+    where: {
+      ...(params.sellerId ? { sellerId: params.sellerId } : {}),
+      ...(params.productId ? { productId: params.productId } : {}),
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.dateFrom || params.dateTo
+        ? {
+            saleDate: {
+              ...(params.dateFrom ? { gte: params.dateFrom } : {}),
+              ...(params.dateTo ? { lte: params.dateTo } : {}),
+            },
+          }
+        : {}),
+      ...(search
+        ? {
+            OR: [
+              { customer: { fullName: { contains: search, mode: "insensitive" as const } } },
+              { product: { name: { contains: search, mode: "insensitive" as const } } },
+            ],
+          }
+        : {}),
+    },
+    select: saleExportSelect,
+    orderBy: { saleDate: "desc" },
+  });
+}
+
 const saleDetailInclude = {
   customer: { select: { id: true, fullName: true } },
   product: { select: { id: true, name: true } },

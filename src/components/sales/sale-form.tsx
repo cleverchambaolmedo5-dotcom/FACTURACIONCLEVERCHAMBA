@@ -41,11 +41,16 @@ function toCents(amount: number): number {
   return Math.round(amount * 100);
 }
 
+function centsToAmountInput(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
+
 /**
  * Splits `totalCents` into `count` shares that sum exactly back to
- * `totalCents` -- mirrors sale-service.distributeCents() so the preview
- * shown here matches what the server will actually charge. Purely
- * visual: the server recomputes and validates this independently.
+ * `totalCents` -- used only to suggest a starting amount for each cuota
+ * input (the first `count - 1` get the floor share, the last absorbs the
+ * rounding remainder). Every cuota amount remains fully editable, and the
+ * server re-validates whatever is actually submitted.
  */
 function distributeCentsPreview(totalCents: number, count: number): number[] {
   const base = Math.floor(totalCents / count);
@@ -102,10 +107,14 @@ export function SaleForm({
   const receiptInputRef = useRef<HTMLInputElement>(null);
   const [receiptClientError, setReceiptClientError] = useState<string | null>(null);
   const receiptError = errors?.receipt ?? receiptClientError ?? undefined;
+  const [installmentsTotalClientError, setInstallmentsTotalClientError] = useState<string | null>(
+    null,
+  );
 
   // Belt-and-suspenders: the actual, unbypassable rule lives in
-  // createSaleForUser (server-side) -- this only blocks the obvious case
-  // of submitting with no file chosen, without a round trip.
+  // createSaleForUser (server-side) -- this only blocks the obvious cases
+  // (no file chosen, cuotas that don't add up to the final price) without
+  // a round trip.
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     const hasFile = !!receiptInputRef.current?.files?.length;
     if (!hasFile) {
@@ -114,6 +123,17 @@ export function SaleForm({
       return;
     }
     setReceiptClientError(null);
+
+    if (installmentsMismatchFinalPrice) {
+      event.preventDefault();
+      setInstallmentsTotalClientError(
+        installmentsExceedFinalPrice
+          ? "La suma de las cuotas no puede superar el precio final de la venta."
+          : "La suma de las cuotas debe ser igual al precio final de la venta.",
+      );
+      return;
+    }
+    setInstallmentsTotalClientError(null);
   }
 
   // Client-side state only drives the live preview below -- the actual
@@ -129,6 +149,13 @@ export function SaleForm({
   // Tracks which due-date inputs the user has hand-edited, so changing
   // the sale date only refreshes still-default (untouched) cuotas.
   const [touched, setTouched] = useState<boolean[]>([false]);
+  // The cuota amounts are now user-editable (see handleInstallmentAmountChange
+  // below), not purely derived. `amountsTouched` mirrors the due-date
+  // `touched` pattern: an untouched cuota keeps tracking the even-split
+  // suggestion as the product/discount/count change, while a hand-edited
+  // one is left alone until the user clears the form.
+  const [installmentAmounts, setInstallmentAmounts] = useState<string[]>(["0.00"]);
+  const [amountsTouched, setAmountsTouched] = useState<boolean[]>([false]);
 
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === productId),
@@ -138,10 +165,31 @@ export function SaleForm({
   const discountValue = Number(discount) || 0;
   const finalPrice = Math.max(originalPrice - discountValue, 0);
   const finalPriceCents = Math.max(toCents(originalPrice) - toCents(discountValue), 0);
-  const installmentAmountsCents = useMemo(
-    () => distributeCentsPreview(finalPriceCents, installmentsCount),
-    [finalPriceCents, installmentsCount],
-  );
+
+  const installmentAmountCents = installmentAmounts
+    .slice(0, installmentsCount)
+    .map((amount) => Math.max(toCents(Number(amount) || 0), 0));
+  const totalInstallmentsCents = installmentAmountCents.reduce((sum, cents) => sum + cents, 0);
+  const remainingBalanceCents = Math.max(finalPriceCents - totalInstallmentsCents, 0);
+  const installmentsExceedFinalPrice = totalInstallmentsCents > finalPriceCents;
+  const installmentsMismatchFinalPrice = totalInstallmentsCents !== finalPriceCents;
+  const installmentsTotalError =
+    errors?.installmentsTotal ?? installmentsTotalClientError ?? undefined;
+
+  /** Refreshes only the untouched cuota amounts to an even split of `newFinalPriceCents` across `count` -- a hand-edited amount is always left as-is. */
+  function syncUntouchedAmounts(
+    previousAmounts: string[],
+    previousTouched: boolean[],
+    newFinalPriceCents: number,
+    count: number,
+  ): string[] {
+    const suggestions = distributeCentsPreview(newFinalPriceCents, count);
+    return Array.from({ length: count }, (_, index) =>
+      previousTouched[index]
+        ? (previousAmounts[index] ?? centsToAmountInput(suggestions[index]))
+        : centsToAmountInput(suggestions[index]),
+    );
+  }
 
   function handleInstallmentsCountChange(count: number) {
     setInstallmentsCount(count);
@@ -153,6 +201,14 @@ export function SaleForm({
       return next;
     });
     setTouched((previous) => {
+      const next = previous.slice(0, count);
+      while (next.length < count) next.push(false);
+      return next;
+    });
+    setInstallmentAmounts((previous) =>
+      syncUntouchedAmounts(previous, amountsTouched, finalPriceCents, count),
+    );
+    setAmountsTouched((previous) => {
       const next = previous.slice(0, count);
       while (next.length < count) next.push(false);
       return next;
@@ -171,6 +227,29 @@ export function SaleForm({
   function handleDueDateChange(index: number, value: string) {
     setDueDates((previous) => previous.map((date, i) => (i === index ? value : date)));
     setTouched((previous) => previous.map((flag, i) => (i === index ? true : flag)));
+  }
+
+  function handleProductChange(value: string) {
+    setProductId(value);
+    const newOriginalPrice = products.find((product) => product.id === value)?.officialPrice ?? 0;
+    const newFinalPriceCents = Math.max(toCents(newOriginalPrice) - toCents(discountValue), 0);
+    setInstallmentAmounts((previous) =>
+      syncUntouchedAmounts(previous, amountsTouched, newFinalPriceCents, installmentsCount),
+    );
+  }
+
+  function handleDiscountChange(value: string) {
+    setDiscount(value);
+    const newDiscountValue = Number(value) || 0;
+    const newFinalPriceCents = Math.max(toCents(originalPrice) - toCents(newDiscountValue), 0);
+    setInstallmentAmounts((previous) =>
+      syncUntouchedAmounts(previous, amountsTouched, newFinalPriceCents, installmentsCount),
+    );
+  }
+
+  function handleInstallmentAmountChange(index: number, value: string) {
+    setInstallmentAmounts((previous) => previous.map((amount, i) => (i === index ? value : amount)));
+    setAmountsTouched((previous) => previous.map((flag, i) => (i === index ? true : flag)));
   }
 
   return (
@@ -200,7 +279,7 @@ export function SaleForm({
           id="productId"
           name="productId"
           value={productId}
-          onChange={(event) => setProductId(event.target.value)}
+          onChange={(event) => handleProductChange(event.target.value)}
           disabled={pending}
           className={fieldClass(!!errors?.productId)}
         >
@@ -266,7 +345,7 @@ export function SaleForm({
           min="0"
           step="0.01"
           value={discount}
-          onChange={(event) => setDiscount(event.target.value)}
+          onChange={(event) => handleDiscountChange(event.target.value)}
           disabled={pending}
           className={fieldClass(!!errors?.discount)}
         />
@@ -335,9 +414,34 @@ export function SaleForm({
           {Array.from({ length: installmentsCount }).map((_, index) => (
             <div key={index} className="rounded-lg border border-border bg-surface p-4">
               <p className="text-sm font-semibold text-foreground">Cuota {index + 1}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Monto: {currencyFormatter.format((installmentAmountsCents[index] ?? 0) / 100)}
-              </p>
+              <div className="mt-2 space-y-1">
+                <label
+                  htmlFor={`installmentAmount-${index}`}
+                  className="text-sm font-medium text-foreground"
+                >
+                  Monto
+                </label>
+                <div className="relative">
+                  <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground">
+                    $
+                  </span>
+                  <input
+                    id={`installmentAmount-${index}`}
+                    name="installmentAmounts"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={installmentAmounts[index] ?? ""}
+                    onChange={(event) => handleInstallmentAmountChange(index, event.target.value)}
+                    disabled={pending}
+                    className={`${fieldClass(!!errors?.installmentAmounts?.[index])} pl-6`}
+                  />
+                </div>
+                {errors?.installmentAmounts?.[index] && (
+                  <p className="text-sm text-error">{errors.installmentAmounts[index]}</p>
+                )}
+              </div>
               <div className="mt-2 space-y-1">
                 <label
                   htmlFor={`installmentDueDate-${index}`}
@@ -361,6 +465,7 @@ export function SaleForm({
             </div>
           ))}
         </div>
+        {installmentsTotalError && <p className="text-sm text-error">{installmentsTotalError}</p>}
       </div>
 
       <div className="rounded-lg border border-border bg-black/[0.02] p-4">
@@ -377,9 +482,22 @@ export function SaleForm({
           <dd className="col-span-1 text-right text-lg font-bold text-primary sm:col-span-2">
             {currencyFormatter.format(finalPrice)}
           </dd>
+          <dt className="text-muted-foreground">Total en cuotas</dt>
+          <dd className="col-span-1 text-right font-medium text-foreground sm:col-span-2">
+            {currencyFormatter.format(totalInstallmentsCents / 100)}
+          </dd>
+          <dt className="font-semibold text-foreground">Saldo pendiente</dt>
+          <dd
+            className={`col-span-1 text-right text-lg font-bold sm:col-span-2 ${
+              installmentsMismatchFinalPrice ? "text-error" : "text-primary"
+            }`}
+          >
+            {currencyFormatter.format(remainingBalanceCents / 100)}
+          </dd>
         </dl>
         <p className="mt-2 text-xs text-muted-foreground">
           El precio final se recalcula y valida en el servidor; esta vista es solo una referencia.
+          La suma de las cuotas debe coincidir exactamente con el precio final.
         </p>
       </div>
 

@@ -111,7 +111,7 @@ export default async function InversionDetallePage({
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Identificación
           </dt>
-          <dd className="text-sm text-foreground">{investment.customer.identification}</dd>
+          <dd className="text-sm text-foreground">{investment.customer.identification || "—"}</dd>
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

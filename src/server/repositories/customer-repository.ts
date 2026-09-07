@@ -82,7 +82,8 @@ export async function findCustomerById(id: string) {
 
 export type CreateCustomerData = {
   fullName: string;
-  identification: string;
+  // Optional -- see Customer.identification in schema.prisma.
+  identification: string | null;
   phone: string;
   email: string | null;
   country: string;

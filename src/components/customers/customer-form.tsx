@@ -78,7 +78,8 @@ export function CustomerForm({
 
       <div className="space-y-1">
         <label htmlFor="identification" className="text-sm font-medium text-foreground">
-          Identificación (cédula / RUC)
+          Identificación (cédula / RUC){" "}
+          <span className="font-normal text-muted-foreground">(opcional)</span>
         </label>
         <input
           id="identification"
