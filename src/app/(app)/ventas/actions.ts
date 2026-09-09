@@ -16,6 +16,19 @@ export type SaleFormState = SaleActionResult | undefined;
 // on the page having already checked it, since a Server Action can be
 // invoked directly regardless of which page rendered the form.
 
+// Cuota payment fields are submitted under an indexed name (e.g.
+// "installmentPaymentMethod-0") rather than a single repeated field name,
+// since each cuota's extra fields (amount/voucher/entregado a) only render
+// in the DOM when that cuota actually has a forma de pago selected -- a
+// shared name read via formData.getAll() would silently misalign once any
+// earlier cuota's fields are absent. ALLOWED_INSTALLMENT_COUNTS tops out at
+// 3, so indices 0-2 always cover every possible cuota.
+const MAX_INSTALLMENTS = 3;
+
+function getIndexed(formData: FormData, prefix: string): FormDataEntryValue[] {
+  return Array.from({ length: MAX_INSTALLMENTS }, (_, index) => formData.get(`${prefix}-${index}`) ?? "");
+}
+
 export async function createSaleAction(
   _prevState: SaleFormState,
   formData: FormData,
@@ -33,13 +46,11 @@ export async function createSaleAction(
     sellerId: formData.get("sellerId"),
     bankAccountId: formData.get("bankAccountId"),
     receipt: formData.get("receipt"),
-    registerInitialPayment: formData.get("registerInitialPayment"),
-    initialPaymentAmount: formData.get("initialPaymentAmount"),
-    initialPaymentDate: formData.get("initialPaymentDate"),
-    initialPaymentMethod: formData.get("initialPaymentMethod"),
-    initialPaymentReference: formData.get("initialPaymentReference"),
-    initialPaymentNotes: formData.get("initialPaymentNotes"),
-    initialPaymentReceipt: formData.get("initialPaymentReceipt"),
+    installmentPaymentMethods: getIndexed(formData, "installmentPaymentMethod"),
+    installmentPaymentAmounts: getIndexed(formData, "installmentPaymentAmount"),
+    installmentPaymentReceivedByNames: getIndexed(formData, "installmentPaymentReceivedByName"),
+    installmentPaymentNotes: getIndexed(formData, "installmentPaymentNotes"),
+    installmentPaymentReceipts: getIndexed(formData, "installmentPaymentReceipt"),
   });
 
   if (!result.ok) {

@@ -58,6 +58,11 @@ enum PaymentMethod {
   BANK_TRANSFER
   CASH
   CARD
+  // Distinct from BANK_TRANSFER: a physical/direct deposit into the
+  // account rather than an electronic transfer. Added for the per-cuota
+  // "forma de pago" selector (see sale-form.tsx's cuotas section) --
+  // existing payments never use this value.
+  DEPOSIT
   OTHER
 }
 
@@ -337,6 +342,13 @@ model Payment {
   // number), and internal notes about the payment.
   reference     String?
   notes         String?
+  // Only meaningful for method = CASH: the name of the person who
+  // physically received the money ("Entregado a"), required by
+  // application logic whenever a cash payment is registered from the
+  // per-cuota "forma de pago" selector (see sale-form.tsx). Optional here
+  // so every other method, and every payment registered before this field
+  // existed, remains a valid, unmodified row.
+  receivedByName String?
 
   validationStatus PaymentValidationStatus @default(PENDING_VALIDATION)
 

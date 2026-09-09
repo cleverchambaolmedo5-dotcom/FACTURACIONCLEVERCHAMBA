@@ -7,6 +7,7 @@ import type { PaymentFormState } from "@/app/(app)/pagos/actions";
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: "Efectivo",
   BANK_TRANSFER: "Transferencia",
+  DEPOSIT: "Depósito",
   CARD: "Tarjeta",
   OTHER: "Otro",
 };

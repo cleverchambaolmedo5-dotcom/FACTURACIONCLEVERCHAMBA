@@ -38,13 +38,7 @@ export type SaleFieldErrors = Partial<
     // Aggregate mismatch between the sum of installment amounts and the
     // sale's final price -- not tied to any single cuota, hence a flat
     // message rather than a per-index array like installmentAmounts below.
-    | "installmentsTotal"
-    // Only populated when registerInitialPayment is checked -- see
-    // createSaleForUser's initial-payment block below.
-    | "initialPaymentAmount"
-    | "initialPaymentDate"
-    | "initialPaymentMethod"
-    | "initialPaymentReceipt",
+    | "installmentsTotal",
     string
   >
 > & {
@@ -55,6 +49,15 @@ export type SaleFieldErrors = Partial<
   // Same per-index shape as installmentDates, for each cuota's manually
   // entered amount.
   installmentAmounts?: (string | undefined)[];
+  // --- Per-cuota "forma de pago" (optional, independent per installment):
+  // one entry per installment index, aligned the same way as
+  // installmentDates/installmentAmounts above. Only populated for a cuota
+  // where a forma de pago was actually selected -- see createSaleForUser's
+  // per-cuota payment block below.
+  installmentPaymentMethods?: (string | undefined)[];
+  installmentPaymentAmounts?: (string | undefined)[];
+  installmentPaymentReceivedByNames?: (string | undefined)[];
+  installmentPaymentReceipts?: (string | undefined)[];
 };
 
 export type SaleActionResult =
@@ -81,17 +84,18 @@ export type RawSaleInput = {
   // Mandatory -- a Sale can never be created without a receipt attached,
   // see the validation in createSaleForUser below.
   receipt?: FormDataEntryValue | null;
-  // --- Initial payment (optional): present only when the customer already
-  // paid installment #1 at the moment the sale is registered. Checkbox
-  // value is the literal string "on" when checked, absent otherwise --
-  // every field below is only validated/required when it is.
-  registerInitialPayment?: FormDataEntryValue | null;
-  initialPaymentAmount?: FormDataEntryValue | null;
-  initialPaymentDate?: FormDataEntryValue | null;
-  initialPaymentMethod?: FormDataEntryValue | null;
-  initialPaymentReference?: FormDataEntryValue | null;
-  initialPaymentNotes?: FormDataEntryValue | null;
-  initialPaymentReceipt?: FormDataEntryValue | null;
+  // --- Per-cuota "forma de pago" (optional, independent per installment):
+  // one value per installment, in installment order -- an empty string
+  // means no method was selected for that cuota (the common case; it just
+  // starts PENDING like today). Every other field below is only
+  // validated/required for an index whose method isn't empty, and
+  // installmentPaymentReceivedByNames only applies when that index's
+  // method is CASH (installmentPaymentReceipts only when it isn't).
+  installmentPaymentMethods?: FormDataEntryValue[];
+  installmentPaymentAmounts?: FormDataEntryValue[];
+  installmentPaymentReceivedByNames?: FormDataEntryValue[];
+  installmentPaymentNotes?: FormDataEntryValue[];
+  installmentPaymentReceipts?: FormDataEntryValue[];
 };
 
 function str(value: FormDataEntryValue | null | undefined): string {
@@ -456,68 +460,105 @@ export async function createSaleForUser(
     }
   }
 
-  // --- Initial payment (optional): if the customer already paid
-  // installment #1 at the moment the sale is registered, this block
-  // validates that data exactly like registerPaymentForUser validates a
-  // manually-registered payment (amount/date/method/receipt), plus one
-  // extra rule specific to this entry point: the amount can never exceed
-  // installment #1's own amount, since it can only ever pay that one
-  // cuota. Entirely opt-in -- skipped whenever the checkbox isn't checked,
-  // so existing sales with no initial payment are completely unaffected.
-  const registerInitialPayment = str(raw.registerInitialPayment) === "on";
-  let initialPaymentAmountCents = 0;
-  let initialPaymentDate: Date | null = null;
-  let initialPaymentMethod: PaymentMethod | null = null;
-  let initialPaymentReceiptFile: File | null = null;
+  // --- Per-cuota "forma de pago" (optional, independent per installment):
+  // for any installment whose forma de pago was actually selected, this
+  // validates that cuota's payment data exactly like registerPaymentForUser
+  // validates a manually-registered payment (amount/method, plus either
+  // "Entregado a" for CASH or a mandatory voucher for every other method),
+  // plus one extra rule specific to this entry point: the amount can never
+  // exceed that installment's own amount, since it can only ever pay that
+  // one cuota. Entirely opt-in per index -- an index with no method
+  // selected is skipped entirely, so existing sales (and any cuota left
+  // unpaid at creation time) are completely unaffected.
+  const installmentPaymentMethods: (PaymentMethod | null)[] = [];
+  const installmentPaymentAmountCents: number[] = [];
+  const installmentPaymentReceivedByNames: (string | undefined)[] = [];
+  const installmentPaymentNotesValues: (string | undefined)[] = [];
+  const installmentPaymentReceiptFiles: (File | null)[] = [];
 
-  if (registerInitialPayment) {
-    const ipAmountRaw = str(raw.initialPaymentAmount);
-    const ipAmountValue = Number(ipAmountRaw);
-    if (!ipAmountRaw || !Number.isFinite(ipAmountValue)) {
-      errors.initialPaymentAmount = "El monto pagado es obligatorio.";
-    } else if (ipAmountValue <= 0) {
-      errors.initialPaymentAmount = "El monto pagado debe ser mayor a cero.";
-    } else {
-      initialPaymentAmountCents = toCents(ipAmountValue);
-      if (
-        hasValidInstallmentsCount &&
-        installmentAmountCents.length === installmentsCount &&
-        !errors.installmentAmounts &&
-        initialPaymentAmountCents > installmentAmountCents[0]
-      ) {
-        errors.initialPaymentAmount =
-          "El monto pagado no puede superar el valor de la primera cuota.";
+  if (hasValidInstallmentsCount) {
+    const methodErrors: (string | undefined)[] = [];
+    const amountErrors: (string | undefined)[] = [];
+    const receivedByNameErrors: (string | undefined)[] = [];
+    const receiptErrors: (string | undefined)[] = [];
+    const rawMethods = (raw.installmentPaymentMethods ?? []).map(str);
+    const rawAmounts = (raw.installmentPaymentAmounts ?? []).map(str);
+    const rawReceivedByNames = (raw.installmentPaymentReceivedByNames ?? []).map(str);
+    const rawNotes = (raw.installmentPaymentNotes ?? []).map(str);
+    const rawReceipts = raw.installmentPaymentReceipts ?? [];
+
+    for (let index = 0; index < installmentsCount; index += 1) {
+      const methodRaw = rawMethods[index] ?? "";
+      if (!methodRaw) {
+        installmentPaymentMethods[index] = null;
+        continue;
       }
-    }
+      if (!isValidPaymentMethod(methodRaw)) {
+        methodErrors[index] = "Selecciona una forma de pago válida.";
+        installmentPaymentMethods[index] = null;
+        continue;
+      }
+      installmentPaymentMethods[index] = methodRaw;
 
-    const ipDateRaw = str(raw.initialPaymentDate);
-    initialPaymentDate = ipDateRaw ? parseDateOnly(ipDateRaw) : null;
-    if (!initialPaymentDate) {
-      errors.initialPaymentDate = "La fecha del pago no es válida.";
-    }
-
-    const ipMethodRaw = str(raw.initialPaymentMethod);
-    if (!ipMethodRaw || !isValidPaymentMethod(ipMethodRaw)) {
-      errors.initialPaymentMethod = "Selecciona un método de pago válido.";
-    } else {
-      initialPaymentMethod = ipMethodRaw;
-    }
-
-    const ipReceipt =
-      raw.initialPaymentReceipt instanceof File && raw.initialPaymentReceipt.size > 0
-        ? raw.initialPaymentReceipt
-        : null;
-    if (!ipReceipt) {
-      errors.initialPaymentReceipt = "Debes adjuntar un comprobante del pago inicial.";
-    } else {
-      const validationError = validateReceiptFile(ipReceipt);
-      if (validationError === "type") {
-        errors.initialPaymentReceipt = "Solo se permiten archivos PDF, JPG, JPEG, PNG o WEBP.";
-      } else if (validationError === "size") {
-        errors.initialPaymentReceipt = `El comprobante no debe superar ${Math.floor(MAX_RECEIPT_BYTES / (1024 * 1024))} MB.`;
+      const amountRaw = rawAmounts[index] ?? "";
+      const amountValue = Number(amountRaw);
+      if (!amountRaw || !Number.isFinite(amountValue)) {
+        amountErrors[index] = "El monto pagado es obligatorio.";
+      } else if (amountValue <= 0) {
+        amountErrors[index] = "El monto pagado debe ser mayor a cero.";
       } else {
-        initialPaymentReceiptFile = ipReceipt;
+        const cents = toCents(amountValue);
+        if (
+          installmentAmountCents.length === installmentsCount &&
+          !errors.installmentAmounts &&
+          cents > installmentAmountCents[index]
+        ) {
+          amountErrors[index] = "El monto pagado no puede superar el valor de la cuota.";
+        } else {
+          installmentPaymentAmountCents[index] = cents;
+        }
       }
+
+      if (methodRaw === PaymentMethod.CASH) {
+        const receivedByName = rawReceivedByNames[index] ?? "";
+        if (!receivedByName) {
+          receivedByNameErrors[index] = "Indica quién recibió el pago.";
+        } else {
+          installmentPaymentReceivedByNames[index] = receivedByName;
+        }
+      } else {
+        const receiptEntry = rawReceipts[index];
+        const receiptFile =
+          receiptEntry instanceof File && receiptEntry.size > 0 ? receiptEntry : null;
+        if (!receiptFile) {
+          receiptErrors[index] = "Debes adjuntar el voucher del pago.";
+        } else {
+          const validationError = validateReceiptFile(receiptFile);
+          if (validationError === "type") {
+            receiptErrors[index] = "Solo se permiten archivos PDF, JPG, JPEG, PNG o WEBP.";
+          } else if (validationError === "size") {
+            receiptErrors[index] =
+              `El voucher no debe superar ${Math.floor(MAX_RECEIPT_BYTES / (1024 * 1024))} MB.`;
+          } else {
+            installmentPaymentReceiptFiles[index] = receiptFile;
+          }
+        }
+      }
+
+      installmentPaymentNotesValues[index] = rawNotes[index] || undefined;
+    }
+
+    if (methodErrors.some((message) => message !== undefined)) {
+      errors.installmentPaymentMethods = methodErrors;
+    }
+    if (amountErrors.some((message) => message !== undefined)) {
+      errors.installmentPaymentAmounts = amountErrors;
+    }
+    if (receivedByNameErrors.some((message) => message !== undefined)) {
+      errors.installmentPaymentReceivedByNames = receivedByNameErrors;
+    }
+    if (receiptErrors.some((message) => message !== undefined)) {
+      errors.installmentPaymentReceipts = receiptErrors;
     }
   }
 
@@ -549,12 +590,7 @@ export async function createSaleForUser(
     !hasValidInstallmentsCount ||
     installmentDueDates.length !== installmentsCount ||
     installmentAmountCents.length !== installmentsCount ||
-    !receiptFile ||
-    (registerInitialPayment &&
-      (initialPaymentAmountCents <= 0 ||
-        !initialPaymentDate ||
-        !initialPaymentMethod ||
-        !initialPaymentReceiptFile))
+    !receiptFile
   ) {
     return { ok: false, errors };
   }
@@ -586,31 +622,66 @@ export async function createSaleForUser(
   }
 
   // Same "save to disk once, up front" treatment as the sale's own receipt
-  // above -- its content never depends on the sale/transaction outcome, and
-  // on any failure below it's deleted again so a failed registration never
-  // leaves an orphaned file with no Payment/PaymentReceipt row.
-  let savedInitialPaymentReceipt: Awaited<ReturnType<typeof saveReceiptFile>> | null = null;
-  if (registerInitialPayment && initialPaymentReceiptFile) {
+  // above -- each voucher's content never depends on the sale/transaction
+  // outcome, and on any failure below every already-saved voucher is
+  // deleted again so a failed registration never leaves an orphaned file
+  // with no Payment/PaymentReceipt row. One entry per installment index,
+  // null wherever that cuota has no method (or is CASH, which never
+  // collects a voucher).
+  const savedInstallmentReceipts: (Awaited<ReturnType<typeof saveReceiptFile>> | null)[] = [];
+  for (let index = 0; index < installmentsCount; index += 1) {
+    const file = installmentPaymentReceiptFiles[index];
+    if (!file) {
+      savedInstallmentReceipts[index] = null;
+      continue;
+    }
     try {
-      savedInitialPaymentReceipt = await saveReceiptFile(initialPaymentReceiptFile, "payment");
+      savedInstallmentReceipts[index] = await saveReceiptFile(file, "payment");
     } catch (error) {
-      console.error("[sales] Failed to save initial payment receipt file:", error);
+      console.error("[sales] Failed to save cuota payment voucher file:", error);
       await deleteReceiptFile(savedReceipt.fileUrl, "sale");
+      for (const saved of savedInstallmentReceipts) {
+        if (saved) await deleteReceiptFile(saved.fileUrl, "payment");
+      }
       return {
         ok: false,
-        formError: "No se pudo guardar el comprobante del pago inicial. Intenta nuevamente.",
+        formError: "No se pudo guardar el voucher de una de las cuotas. Intenta nuevamente.",
       };
     }
   }
 
+  const installmentPayments = installmentPaymentMethods
+    .map((method, index) => {
+      if (!method) return null;
+      const savedReceiptForIndex = savedInstallmentReceipts[index];
+      return {
+        installmentNumber: index + 1,
+        amount: centsToDecimalString(installmentPaymentAmountCents[index]),
+        paymentDate: saleDate,
+        method,
+        notes: installmentPaymentNotesValues[index],
+        receivedByName: installmentPaymentReceivedByNames[index],
+        registeredById: user.id,
+        receipt: savedReceiptForIndex
+          ? {
+              fileUrl: savedReceiptForIndex.fileUrl,
+              fileName: savedReceiptForIndex.fileName,
+              fileType: savedReceiptForIndex.fileType,
+              uploadedById: user.id,
+            }
+          : undefined,
+      };
+    })
+    .filter((payment): payment is NonNullable<typeof payment> => payment !== null);
+
   try {
-    // Sale + Installments + SaleReceipt (+ the initial Payment/
-    // PaymentReceipt against installment #1, if provided) are created
+    // Sale + Installments + SaleReceipt (+ one Payment/PaymentReceipt per
+    // cuota that already had a forma de pago selected) are created
     // together in one Prisma transaction (see
     // sale-repository.createSaleWithInstallments) -- a sale can never exist
     // without its installments or its receipt, or vice versa, and it can
-    // never report success while "missing" the initial payment it was
-    // asked to record.
+    // never report success while "missing" a cuota payment it was asked to
+    // record.
     const sale = await saleRepository.createSaleWithInstallments({
       customerId: customer.id,
       sellerId,
@@ -627,30 +698,14 @@ export async function createSaleForUser(
         fileType: savedReceipt.fileType,
         uploadedById: user.id,
       },
-      initialPayment:
-        registerInitialPayment && initialPaymentDate && initialPaymentMethod && savedInitialPaymentReceipt
-          ? {
-              amount: centsToDecimalString(initialPaymentAmountCents),
-              paymentDate: initialPaymentDate,
-              method: initialPaymentMethod,
-              reference: str(raw.initialPaymentReference) || undefined,
-              notes: str(raw.initialPaymentNotes) || undefined,
-              registeredById: user.id,
-              receipt: {
-                fileUrl: savedInitialPaymentReceipt.fileUrl,
-                fileName: savedInitialPaymentReceipt.fileName,
-                fileType: savedInitialPaymentReceipt.fileType,
-                uploadedById: user.id,
-              },
-            }
-          : undefined,
+      installmentPayments,
     });
     return { ok: true, id: sale.id };
   } catch (error) {
     console.error("[sales] Failed to create sale:", error);
     await deleteReceiptFile(savedReceipt.fileUrl, "sale");
-    if (savedInitialPaymentReceipt) {
-      await deleteReceiptFile(savedInitialPaymentReceipt.fileUrl, "payment");
+    for (const saved of savedInstallmentReceipts) {
+      if (saved) await deleteReceiptFile(saved.fileUrl, "payment");
     }
     return { ok: false, formError: "No se pudo crear la venta. Intenta nuevamente." };
   }

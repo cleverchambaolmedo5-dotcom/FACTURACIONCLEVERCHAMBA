@@ -133,6 +133,11 @@ export type CreatePaymentData = {
   method: PaymentMethod;
   reference?: string;
   notes?: string;
+  // Only meaningful for method = CASH ("Entregado a") -- see
+  // Payment.receivedByName in schema.prisma. Optional here since the
+  // manual "Registrar pago" flow (registerPaymentForUser) never collects
+  // it, only the per-cuota forma-de-pago flow at sale creation does.
+  receivedByName?: string;
   registeredById: string;
 };
 
@@ -146,6 +151,7 @@ export async function createPayment(db: Db, data: CreatePaymentData) {
       method: data.method,
       reference: data.reference,
       notes: data.notes,
+      receivedByName: data.receivedByName,
       registeredById: data.registeredById,
     },
   });

@@ -13,9 +13,21 @@ import type { NewCustomerAction } from "./customer-create-modal";
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: "Efectivo",
   BANK_TRANSFER: "Transferencia",
+  DEPOSIT: "Depósito",
   CARD: "Tarjeta",
   OTHER: "Otro",
 };
+
+// The only forma-de-pago options selectable per cuota (see the "Forma de
+// pago" selector inside each cuota block below) -- OTHER stays a valid
+// PaymentMethod value elsewhere (e.g. a manually-registered payment via
+// payment-form.tsx) but is intentionally not offered here.
+const CUOTA_PAYMENT_METHODS = [
+  PaymentMethod.CASH,
+  PaymentMethod.BANK_TRANSFER,
+  PaymentMethod.DEPOSIT,
+  PaymentMethod.CARD,
+] as const;
 
 export type SaleFormAction = (
   state: SaleFormState,
@@ -122,70 +134,111 @@ export function SaleForm({
     null,
   );
 
-  // --- Initial payment (optional): "el cliente ya pagó la Cuota 1". When
-  // checked, creates a Payment (PENDING_VALIDATION) against installment #1
-  // together with the sale itself -- see sale-service.ts#createSaleForUser.
-  const [hasInitialPayment, setHasInitialPayment] = useState(false);
-  const [initialPaymentAmount, setInitialPaymentAmount] = useState("0.00");
-  const [initialPaymentDate, setInitialPaymentDate] = useState(defaultSaleDate);
-  const initialPaymentReceiptRef = useRef<HTMLInputElement>(null);
-  const [initialPaymentReceiptClientError, setInitialPaymentReceiptClientError] = useState<
-    string | null
-  >(null);
-  // Merges errors.receipt in too: while hasInitialPayment is checked, the
-  // single file the user attaches here is mirrored into the hidden
-  // `receipt` input (see handleInitialPaymentReceiptChange) and backs both
-  // records server-side, so a rejection of either one must surface here --
-  // the separate "Adjuntar comprobante" field isn't rendered in that case.
-  const initialPaymentReceiptError =
-    errors?.initialPaymentReceipt ?? errors?.receipt ?? initialPaymentReceiptClientError ?? undefined;
+  // --- Per-cuota "forma de pago" (optional, independent per installment):
+  // each cuota may optionally record how it was already paid at the moment
+  // the sale is registered, with its own method and fields -- see
+  // sale-service.ts#createSaleForUser's per-cuota payment block. Arrays are
+  // aligned by cuota index, mirroring installmentAmounts/dueDates above. An
+  // empty method (the default) means "no payment yet" for that cuota, same
+  // as today.
+  const [installmentPaymentMethods, setInstallmentPaymentMethods] = useState<string[]>([""]);
+  const [installmentPaymentAmounts, setInstallmentPaymentAmounts] = useState<string[]>(["0.00"]);
+  const [installmentPaymentReceivedByNames, setInstallmentPaymentReceivedByNames] = useState<
+    string[]
+  >([""]);
+  const [installmentPaymentNotesValues, setInstallmentPaymentNotesValues] = useState<string[]>([
+    "",
+  ]);
+  const installmentPaymentReceiptRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const [installmentPaymentReceiptClientErrors, setInstallmentPaymentReceiptClientErrors] =
+    useState<(string | null)[]>([null]);
+  const [
+    installmentPaymentReceivedByNameClientErrors,
+    setInstallmentPaymentReceivedByNameClientErrors,
+  ] = useState<(string | null)[]>([null]);
 
-  function handleToggleInitialPayment(checked: boolean) {
-    setHasInitialPayment(checked);
-    if (checked) {
-      setInitialPaymentAmount(installmentAmounts[0] ?? "0.00");
-      setInitialPaymentDate(saleDate);
-    }
+  /** Selecting a method for a cuota defaults its "Monto pagado" to that cuota's own amount, the same convenience the old single "ya pagó" checkbox offered. */
+  function handleInstallmentPaymentMethodChange(index: number, value: string) {
+    setInstallmentPaymentMethods((previous) => previous.map((m, i) => (i === index ? value : m)));
+    setInstallmentPaymentAmounts((previous) =>
+      previous.map((amount, i) =>
+        i === index && value && (!amount || amount === "0.00")
+          ? installmentAmounts[index] ?? "0.00"
+          : amount,
+      ),
+    );
+    setInstallmentPaymentReceiptClientErrors((previous) =>
+      previous.map((e, i) => (i === index ? null : e)),
+    );
+    setInstallmentPaymentReceivedByNameClientErrors((previous) =>
+      previous.map((e, i) => (i === index ? null : e)),
+    );
   }
 
-  /**
-   * Mirrors the single comprobante file into the hidden `receipt` input
-   * (via DataTransfer) whenever "ya pagó la Cuota 1" is checked -- the user
-   * uploads one file, but it ends up backing both the SaleReceipt and the
-   * initial Payment's PaymentReceipt server-side, exactly as if they'd
-   * uploaded it twice into the two separate fields this replaces.
-   */
-  function handleInitialPaymentReceiptChange(file: File | null) {
-    setInitialPaymentReceiptClientError(null);
-    if (file && receiptInputRef.current) {
-      const transfer = new DataTransfer();
-      transfer.items.add(file);
-      receiptInputRef.current.files = transfer.files;
-    }
+  function handleInstallmentPaymentAmountChange(index: number, value: string) {
+    setInstallmentPaymentAmounts((previous) => previous.map((a, i) => (i === index ? value : a)));
+  }
+
+  function handleInstallmentPaymentReceivedByNameChange(index: number, value: string) {
+    setInstallmentPaymentReceivedByNames((previous) =>
+      previous.map((a, i) => (i === index ? value : a)),
+    );
+  }
+
+  function handleInstallmentPaymentNotesChange(index: number, value: string) {
+    setInstallmentPaymentNotesValues((previous) =>
+      previous.map((a, i) => (i === index ? value : a)),
+    );
   }
 
   // Belt-and-suspenders: the actual, unbypassable rule lives in
   // createSaleForUser (server-side) -- this only blocks the obvious cases
-  // (no file chosen, cuotas that don't add up to the final price) without
-  // a round trip.
+  // (no file chosen, cuotas that don't add up to the final price, a cuota
+  // payment missing its "Entregado a"/voucher) without a round trip.
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    if (hasInitialPayment) {
-      const hasInitialPaymentFile = !!initialPaymentReceiptRef.current?.files?.length;
-      if (!hasInitialPaymentFile) {
-        event.preventDefault();
-        setInitialPaymentReceiptClientError("Debes adjuntar un comprobante de pago.");
-        return;
+    const hasFile = !!receiptInputRef.current?.files?.length;
+    if (!hasFile) {
+      event.preventDefault();
+      setReceiptClientError("Debes adjuntar un comprobante para registrar la venta.");
+      return;
+    }
+    setReceiptClientError(null);
+
+    const nextReceiptErrors = installmentPaymentReceiptClientErrors.slice();
+    const nextReceivedByNameErrors = installmentPaymentReceivedByNameClientErrors.slice();
+    let hasCuotaPaymentError = false;
+
+    for (let index = 0; index < installmentsCount; index += 1) {
+      const method = installmentPaymentMethods[index];
+      if (!method) {
+        nextReceiptErrors[index] = null;
+        nextReceivedByNameErrors[index] = null;
+        continue;
       }
-      setInitialPaymentReceiptClientError(null);
-      setReceiptClientError(null);
-    } else {
-      const hasFile = !!receiptInputRef.current?.files?.length;
-      if (!hasFile) {
-        event.preventDefault();
-        setReceiptClientError("Debes adjuntar un comprobante para registrar la venta.");
-        return;
+      if (method === PaymentMethod.CASH) {
+        nextReceiptErrors[index] = null;
+        if (!installmentPaymentReceivedByNames[index]?.trim()) {
+          nextReceivedByNameErrors[index] = "Indica quién recibió el pago.";
+          hasCuotaPaymentError = true;
+        } else {
+          nextReceivedByNameErrors[index] = null;
+        }
+      } else {
+        nextReceivedByNameErrors[index] = null;
+        const hasVoucher = !!installmentPaymentReceiptRefs.current[index]?.files?.length;
+        if (!hasVoucher) {
+          nextReceiptErrors[index] = "Debes adjuntar el voucher del pago.";
+          hasCuotaPaymentError = true;
+        } else {
+          nextReceiptErrors[index] = null;
+        }
       }
-      setReceiptClientError(null);
+    }
+    setInstallmentPaymentReceiptClientErrors(nextReceiptErrors);
+    setInstallmentPaymentReceivedByNameClientErrors(nextReceivedByNameErrors);
+    if (hasCuotaPaymentError) {
+      event.preventDefault();
+      return;
     }
 
     const installmentsTotalMessage = installmentsExceedFinalPrice
@@ -302,6 +355,37 @@ export function SaleForm({
       computeUntouchedDistribution(previous, nextAmountsTouched, finalPriceCents, count),
     );
     setAmountsTouched(nextAmountsTouched);
+
+    setInstallmentPaymentMethods((previous) => {
+      const next = previous.slice(0, count);
+      while (next.length < count) next.push("");
+      return next;
+    });
+    setInstallmentPaymentAmounts((previous) => {
+      const next = previous.slice(0, count);
+      while (next.length < count) next.push("0.00");
+      return next;
+    });
+    setInstallmentPaymentReceivedByNames((previous) => {
+      const next = previous.slice(0, count);
+      while (next.length < count) next.push("");
+      return next;
+    });
+    setInstallmentPaymentNotesValues((previous) => {
+      const next = previous.slice(0, count);
+      while (next.length < count) next.push("");
+      return next;
+    });
+    setInstallmentPaymentReceiptClientErrors((previous) => {
+      const next = previous.slice(0, count);
+      while (next.length < count) next.push(null);
+      return next;
+    });
+    setInstallmentPaymentReceivedByNameClientErrors((previous) => {
+      const next = previous.slice(0, count);
+      while (next.length < count) next.push(null);
+      return next;
+    });
   }
 
   function handleSaleDateChange(value: string) {
@@ -555,6 +639,166 @@ export function SaleForm({
                   <p className="text-sm text-error">{errors.installmentDates[index]}</p>
                 )}
               </div>
+
+              <div className="mt-2 space-y-1">
+                <label
+                  htmlFor={`installmentPaymentMethod-${index}`}
+                  className="text-sm font-medium text-foreground"
+                >
+                  Forma de pago
+                </label>
+                <select
+                  id={`installmentPaymentMethod-${index}`}
+                  name={`installmentPaymentMethod-${index}`}
+                  value={installmentPaymentMethods[index] ?? ""}
+                  onChange={(event) =>
+                    handleInstallmentPaymentMethodChange(index, event.target.value)
+                  }
+                  disabled={pending}
+                  className={fieldClass(!!errors?.installmentPaymentMethods?.[index])}
+                >
+                  <option value="">Seleccionar forma de pago</option>
+                  {CUOTA_PAYMENT_METHODS.map((method) => (
+                    <option key={method} value={method}>
+                      {METHOD_LABELS[method]}
+                    </option>
+                  ))}
+                </select>
+                {errors?.installmentPaymentMethods?.[index] && (
+                  <p className="text-sm text-error">{errors.installmentPaymentMethods[index]}</p>
+                )}
+              </div>
+
+              {installmentPaymentMethods[index] && (
+                <div className="mt-3 space-y-3 rounded-md border border-border bg-black/[0.02] p-3">
+                  <div className="space-y-1">
+                    <label
+                      htmlFor={`installmentPaymentAmount-${index}`}
+                      className="text-sm font-medium text-foreground"
+                    >
+                      Monto pagado
+                    </label>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground">
+                        $
+                      </span>
+                      <input
+                        id={`installmentPaymentAmount-${index}`}
+                        name={`installmentPaymentAmount-${index}`}
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        inputMode="decimal"
+                        value={installmentPaymentAmounts[index] ?? ""}
+                        onChange={(event) =>
+                          handleInstallmentPaymentAmountChange(index, event.target.value)
+                        }
+                        disabled={pending}
+                        className={`${fieldClass(!!errors?.installmentPaymentAmounts?.[index])} pl-6`}
+                      />
+                    </div>
+                    {errors?.installmentPaymentAmounts?.[index] && (
+                      <p className="text-sm text-error">
+                        {errors.installmentPaymentAmounts[index]}
+                      </p>
+                    )}
+                  </div>
+
+                  {installmentPaymentMethods[index] === PaymentMethod.CASH ? (
+                    <div className="space-y-1">
+                      <label
+                        htmlFor={`installmentPaymentReceivedByName-${index}`}
+                        className="text-sm font-medium text-foreground"
+                      >
+                        Entregado a
+                      </label>
+                      <input
+                        id={`installmentPaymentReceivedByName-${index}`}
+                        name={`installmentPaymentReceivedByName-${index}`}
+                        value={installmentPaymentReceivedByNames[index] ?? ""}
+                        onChange={(event) =>
+                          handleInstallmentPaymentReceivedByNameChange(index, event.target.value)
+                        }
+                        disabled={pending}
+                        className={fieldClass(
+                          !!(
+                            errors?.installmentPaymentReceivedByNames?.[index] ??
+                            installmentPaymentReceivedByNameClientErrors[index]
+                          ),
+                        )}
+                      />
+                      {(errors?.installmentPaymentReceivedByNames?.[index] ??
+                        installmentPaymentReceivedByNameClientErrors[index]) && (
+                        <p className="text-sm text-error">
+                          {errors?.installmentPaymentReceivedByNames?.[index] ??
+                            installmentPaymentReceivedByNameClientErrors[index]}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <label
+                        htmlFor={`installmentPaymentReceipt-${index}`}
+                        className="text-sm font-medium text-foreground"
+                      >
+                        Voucher *
+                      </label>
+                      <input
+                        ref={(el) => {
+                          installmentPaymentReceiptRefs.current[index] = el;
+                        }}
+                        id={`installmentPaymentReceipt-${index}`}
+                        name={`installmentPaymentReceipt-${index}`}
+                        type="file"
+                        accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
+                        disabled={pending}
+                        onChange={() =>
+                          setInstallmentPaymentReceiptClientErrors((previous) =>
+                            previous.map((e, i) => (i === index ? null : e)),
+                          )
+                        }
+                        className={fieldClass(
+                          !!(
+                            errors?.installmentPaymentReceipts?.[index] ??
+                            installmentPaymentReceiptClientErrors[index]
+                          ),
+                        )}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        PDF, JPG, PNG o WEBP. Máximo 5 MB.
+                      </p>
+                      {(errors?.installmentPaymentReceipts?.[index] ??
+                        installmentPaymentReceiptClientErrors[index]) && (
+                        <p className="text-sm text-error">
+                          {errors?.installmentPaymentReceipts?.[index] ??
+                            installmentPaymentReceiptClientErrors[index]}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <label
+                      htmlFor={`installmentPaymentNotes-${index}`}
+                      className="text-sm font-medium text-foreground"
+                    >
+                      Observación{" "}
+                      <span className="font-normal text-muted-foreground">(opcional)</span>
+                    </label>
+                    <textarea
+                      id={`installmentPaymentNotes-${index}`}
+                      name={`installmentPaymentNotes-${index}`}
+                      rows={2}
+                      value={installmentPaymentNotesValues[index] ?? ""}
+                      onChange={(event) =>
+                        handleInstallmentPaymentNotesChange(index, event.target.value)
+                      }
+                      disabled={pending}
+                      className={fieldClass(false)}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -594,179 +838,24 @@ export function SaleForm({
         </p>
       </div>
 
-      <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
-        <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <input
-            type="checkbox"
-            checked={hasInitialPayment}
-            onChange={(event) => handleToggleInitialPayment(event.target.checked)}
-            disabled={pending}
-            className="h-4 w-4 rounded border-border"
-          />
-          El cliente ya pagó la Cuota 1 al momento de esta venta
+      <div className="space-y-1">
+        <label htmlFor="receipt" className="text-sm font-medium text-foreground">
+          Adjuntar comprobante *
         </label>
-
-        {hasInitialPayment && (
-          <div className="space-y-4 pt-2">
-            <input type="hidden" name="registerInitialPayment" value="on" />
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1">
-                <label
-                  htmlFor="initialPaymentAmount"
-                  className="text-sm font-medium text-foreground"
-                >
-                  Monto pagado
-                </label>
-                <input
-                  id="initialPaymentAmount"
-                  name="initialPaymentAmount"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={initialPaymentAmount}
-                  onChange={(event) => setInitialPaymentAmount(event.target.value)}
-                  disabled={pending}
-                  className={fieldClass(!!errors?.initialPaymentAmount)}
-                />
-                {errors?.initialPaymentAmount && (
-                  <p className="text-sm text-error">{errors.initialPaymentAmount}</p>
-                )}
-              </div>
-
-              <div className="space-y-1">
-                <label
-                  htmlFor="initialPaymentDate"
-                  className="text-sm font-medium text-foreground"
-                >
-                  Fecha del pago
-                </label>
-                <input
-                  id="initialPaymentDate"
-                  name="initialPaymentDate"
-                  type="date"
-                  value={initialPaymentDate}
-                  onChange={(event) => setInitialPaymentDate(event.target.value)}
-                  disabled={pending}
-                  className={fieldClass(!!errors?.initialPaymentDate)}
-                />
-                {errors?.initialPaymentDate && (
-                  <p className="text-sm text-error">{errors.initialPaymentDate}</p>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label htmlFor="initialPaymentMethod" className="text-sm font-medium text-foreground">
-                Método de pago
-              </label>
-              <select
-                id="initialPaymentMethod"
-                name="initialPaymentMethod"
-                defaultValue=""
-                disabled={pending}
-                className={fieldClass(!!errors?.initialPaymentMethod)}
-              >
-                <option value="" disabled>
-                  Selecciona un método…
-                </option>
-                {Object.values(PaymentMethod).map((method) => (
-                  <option key={method} value={method}>
-                    {METHOD_LABELS[method]}
-                  </option>
-                ))}
-              </select>
-              {errors?.initialPaymentMethod && (
-                <p className="text-sm text-error">{errors.initialPaymentMethod}</p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <label
-                htmlFor="initialPaymentReference"
-                className="text-sm font-medium text-foreground"
-              >
-                Referencia <span className="font-normal text-muted-foreground">(opcional)</span>
-              </label>
-              <input
-                id="initialPaymentReference"
-                name="initialPaymentReference"
-                disabled={pending}
-                className={fieldClass(false)}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label htmlFor="initialPaymentNotes" className="text-sm font-medium text-foreground">
-                Observaciones <span className="font-normal text-muted-foreground">(opcional)</span>
-              </label>
-              <textarea
-                id="initialPaymentNotes"
-                name="initialPaymentNotes"
-                rows={2}
-                disabled={pending}
-                className={fieldClass(false)}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label
-                htmlFor="initialPaymentReceipt"
-                className="text-sm font-medium text-foreground"
-              >
-                Comprobante de pago *
-              </label>
-              <input
-                ref={initialPaymentReceiptRef}
-                id="initialPaymentReceipt"
-                name="initialPaymentReceipt"
-                type="file"
-                accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
-                disabled={pending}
-                onChange={(event) =>
-                  handleInitialPaymentReceiptChange(event.target.files?.[0] ?? null)
-                }
-                className={fieldClass(!!initialPaymentReceiptError)}
-              />
-              {/* Mirrors the same file into the sale's own `receipt` field
-                  (see handleInitialPaymentReceiptChange) so it backs both
-                  the SaleReceipt and this initial Payment's PaymentReceipt
-                  without asking the user to upload it twice. */}
-              <input ref={receiptInputRef} type="file" name="receipt" hidden disabled={pending} />
-              <p className="text-xs text-muted-foreground">PDF, JPG, PNG o WEBP. Máximo 5 MB.</p>
-              {initialPaymentReceiptError && (
-                <p className="text-sm text-error">{initialPaymentReceiptError}</p>
-              )}
-            </div>
-
-            <p className="text-xs text-muted-foreground">
-              Este comprobante se usará tanto para el pago inicial como para el registro de la
-              venta, y quedará pendiente de validación en Contabilidad → Comprobantes.
-            </p>
-          </div>
-        )}
+        <input
+          ref={receiptInputRef}
+          id="receipt"
+          name="receipt"
+          type="file"
+          accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
+          required
+          disabled={pending}
+          onChange={() => setReceiptClientError(null)}
+          className={fieldClass(!!receiptError)}
+        />
+        <p className="text-xs text-muted-foreground">PDF, JPG, PNG o WEBP. Máximo 5 MB.</p>
+        {receiptError && <p className="text-sm text-error">{receiptError}</p>}
       </div>
-
-      {!hasInitialPayment && (
-        <div className="space-y-1">
-          <label htmlFor="receipt" className="text-sm font-medium text-foreground">
-            Adjuntar comprobante *
-          </label>
-          <input
-            ref={receiptInputRef}
-            id="receipt"
-            name="receipt"
-            type="file"
-            accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
-            required
-            disabled={pending}
-            onChange={() => setReceiptClientError(null)}
-            className={fieldClass(!!receiptError)}
-          />
-          <p className="text-xs text-muted-foreground">PDF, JPG, PNG o WEBP. Máximo 5 MB.</p>
-          {receiptError && <p className="text-sm text-error">{receiptError}</p>}
-        </div>
-      )}
 
       {formError && <p className="text-sm text-error">{formError}</p>}
 

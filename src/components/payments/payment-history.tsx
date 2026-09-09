@@ -10,6 +10,7 @@ const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", cu
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: "Efectivo",
   BANK_TRANSFER: "Transferencia",
+  DEPOSIT: "Depósito",
   CARD: "Tarjeta",
   OTHER: "Otro",
 };

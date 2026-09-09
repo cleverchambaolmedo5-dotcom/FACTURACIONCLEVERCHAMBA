@@ -159,22 +159,28 @@ export type CreateSaleReceiptData = {
   uploadedById: string;
 };
 
-// Optional Payment (+ PaymentReceipt) created against installment #1 in the
-// same transaction as the sale, when the customer already paid it at the
-// moment the sale is registered -- see sale-service.ts#createSaleForUser's
-// "registerInitialPayment" handling. Mirrors RawPaymentInput/CreatePaymentData
-// in payment-service.ts/payment-repository.ts exactly, since this produces
-// the exact same kind of row (PENDING_VALIDATION, awaiting Contabilidad's
+// Optional Payment (+ PaymentReceipt, when the method requires a voucher)
+// created against one specific installment in the same transaction as the
+// sale, when the customer already paid that cuota at the moment the sale is
+// registered -- see sale-service.ts#createSaleForUser's per-cuota "forma de
+// pago" handling. Mirrors RawPaymentInput/CreatePaymentData in
+// payment-service.ts/payment-repository.ts exactly, since this produces the
+// exact same kind of row (PENDING_VALIDATION, awaiting Contabilidad's
 // approval in Comprobantes) -- just created eagerly instead of through the
-// separate "Pagar" flow.
-export type CreateSaleInitialPaymentData = {
+// separate "Pagar" flow. One of these can be provided per installment
+// (never more than one, and never for an installment that doesn't exist on
+// this sale).
+export type CreateSaleInstallmentPaymentData = {
+  installmentNumber: number;
   amount: string;
   paymentDate: Date;
   method: PaymentMethod;
-  reference?: string;
   notes?: string;
+  // Only set for method = CASH ("Entregado a") -- see Payment.receivedByName.
+  receivedByName?: string;
   registeredById: string;
-  receipt: CreateSaleReceiptData;
+  // Absent for method = CASH (no voucher collected for cash payments).
+  receipt?: CreateSaleReceiptData;
 };
 
 export type CreateSaleData = {
@@ -194,19 +200,22 @@ export type CreateSaleData = {
   // Required -- see sale-service.ts#createSaleForUser, which never reaches
   // this call without an already-saved receipt file.
   receipt: CreateSaleReceiptData;
-  // Present only when the customer already paid installment #1 at sale
-  // creation time -- see CreateSaleInitialPaymentData above.
-  initialPayment?: CreateSaleInitialPaymentData;
+  // One entry per installment that already had a "forma de pago" selected
+  // at sale creation time -- see CreateSaleInstallmentPaymentData above.
+  // Never more entries than `installments`, and always empty for a sale
+  // where no cuota was marked as already paid.
+  installmentPayments?: CreateSaleInstallmentPaymentData[];
 };
 
 /**
  * Creates a Sale together with all of its Installments and its
  * SaleReceipt in a single transaction: it must never be possible to end up
  * with a Sale that has no installments (or installments without a Sale),
- * or a Sale with no receipt, due to a partial failure. When `initialPayment`
- * is present, the Payment (+ PaymentReceipt) against installment #1 is
- * created in this same transaction, so a sale can also never end up
- * "missing" the initial payment its own creation reported succeeding.
+ * or a Sale with no receipt, due to a partial failure. When
+ * `installmentPayments` entries are present, the Payment (+ PaymentReceipt,
+ * when the method requires a voucher) for each of those specific
+ * installments is created in this same transaction, so a sale can never end
+ * up "missing" a cuota payment its own creation reported succeeding.
  */
 export async function createSaleWithInstallments(data: CreateSaleData) {
   return prisma.$transaction(async (tx) => {
@@ -239,24 +248,28 @@ export async function createSaleWithInstallments(data: CreateSaleData) {
       select: { id: true, installments: { select: { id: true, installmentNumber: true } } },
     });
 
-    if (data.initialPayment) {
-      const firstInstallment = sale.installments.find((i) => i.installmentNumber === 1);
-      if (firstInstallment) {
-        const payment = await paymentRepository.createPayment(tx, {
-          installmentId: firstInstallment.id,
-          amount: data.initialPayment.amount,
-          paymentDate: data.initialPayment.paymentDate,
-          method: data.initialPayment.method,
-          reference: data.initialPayment.reference,
-          notes: data.initialPayment.notes,
-          registeredById: data.initialPayment.registeredById,
-        });
+    for (const installmentPayment of data.installmentPayments ?? []) {
+      const targetInstallment = sale.installments.find(
+        (i) => i.installmentNumber === installmentPayment.installmentNumber,
+      );
+      if (!targetInstallment) continue;
+
+      const payment = await paymentRepository.createPayment(tx, {
+        installmentId: targetInstallment.id,
+        amount: installmentPayment.amount,
+        paymentDate: installmentPayment.paymentDate,
+        method: installmentPayment.method,
+        notes: installmentPayment.notes,
+        receivedByName: installmentPayment.receivedByName,
+        registeredById: installmentPayment.registeredById,
+      });
+      if (installmentPayment.receipt) {
         await paymentRepository.createPaymentReceipt(tx, {
           paymentId: payment.id,
-          fileUrl: data.initialPayment.receipt.fileUrl,
-          fileName: data.initialPayment.receipt.fileName,
-          fileType: data.initialPayment.receipt.fileType,
-          uploadedById: data.initialPayment.receipt.uploadedById,
+          fileUrl: installmentPayment.receipt.fileUrl,
+          fileName: installmentPayment.receipt.fileName,
+          fileType: installmentPayment.receipt.fileType,
+          uploadedById: installmentPayment.receipt.uploadedById,
         });
       }
     }
