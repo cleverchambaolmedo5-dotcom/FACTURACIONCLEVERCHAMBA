@@ -1,5 +1,5 @@
 import "server-only";
-import { InvestmentStatus, SaleStatus } from "@/generated/prisma/enums";
+import { InstallmentStatus, InvestmentStatus, SaleStatus } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 import type { PublicUser } from "@/lib/auth/session";
 import { listInvestmentsForUser } from "@/server/services/investment-service";
@@ -114,14 +114,12 @@ export type SalesDashboardData = {
 };
 
 /**
- * Shared aggregation for every role: listSalesForUser already scopes rows
- * (SELLER only sees their own sales, ADMIN/ACCOUNTANT see all -- see
- * sale-service.ts), so this only computes totals/slices from whatever it
- * returns.
+ * Pure aggregation step, split out from getSalesDashboardData below so a
+ * caller that already fetched `sales` for another purpose in the same
+ * request (see getFinancialSalesDashboardData) can reuse that same array
+ * instead of triggering a second, identical listSalesForUser query.
  */
-async function getSalesDashboardData(user: PublicUser): Promise<SalesDashboardData> {
-  const sales = await listSalesForUser(user, {});
-
+function buildSalesDashboardData(sales: SaleListItem[]): SalesDashboardData {
   const active = sales.filter((sale) => sale.status === SaleStatus.ACTIVE);
   const paid = sales.filter((sale) => sale.status === SaleStatus.PAID);
   const overdue = sales.filter((sale) => sale.status === SaleStatus.OVERDUE);
@@ -140,6 +138,17 @@ async function getSalesDashboardData(user: PublicUser): Promise<SalesDashboardDa
     overdueSales: overdue.slice(0, RECENT_LIMIT),
     recentSales: sales.slice(0, RECENT_LIMIT), // already saleDate desc -- see saleRepository.listSales
   };
+}
+
+/**
+ * Shared aggregation for every role: listSalesForUser already scopes rows
+ * (SELLER only sees their own sales, ADMIN/ACCOUNTANT see all -- see
+ * sale-service.ts), so this only computes totals/slices from whatever it
+ * returns.
+ */
+async function getSalesDashboardData(user: PublicUser): Promise<SalesDashboardData> {
+  const sales = await listSalesForUser(user, {});
+  return buildSalesDashboardData(sales);
 }
 
 export type SellerSalesDashboardData = SalesDashboardData & {
@@ -192,13 +201,17 @@ export type OverdueInstallmentItem = {
  * this never re-sums sale totals on its own (which would double count
  * against the payment ledger), it only partitions the same ledger already
  * used for the Comprobantes/Cuotas modules.
+ *
+ * Pure aggregation step, split out the same way buildSalesDashboardData is
+ * above: getFinancialSalesDashboardData already has `sales` and
+ * `installments` in hand (fetched once for the whole dashboard) and passes
+ * them straight in here instead of triggering a second listSalesForUser/
+ * listInstallmentsForUser round-trip for the exact same rows.
  */
-async function getFinancialSummaryForUser(user: PublicUser): Promise<FinancialSummary> {
-  const [sales, installments] = await Promise.all([
-    listSalesForUser(user, {}),
-    listInstallmentsForUser(user, {}),
-  ]);
-
+function buildFinancialSummary(
+  sales: SaleListItem[],
+  installments: DecoratedInstallmentListRow[],
+): FinancialSummary {
   const soldSaleIds = new Set(
     sales.filter((sale) => countsAsSold(sale.status)).map((sale) => sale.id),
   );
@@ -246,15 +259,25 @@ export type FinancialSalesDashboardData = SalesDashboardData & {
 export async function getFinancialSalesDashboardData(
   user: PublicUser,
 ): Promise<FinancialSalesDashboardData> {
-  const [base, pendingPayments, financialSummary, overdueInstallmentRows] = await Promise.all([
-    getSalesDashboardData(user),
+  // `sales` and `installments` each back two of the sections below (base
+  // stats + financial summary, and financial summary + overdue list,
+  // respectively) -- fetched once here and reused via the pure builders
+  // above instead of issuing each of those two queries twice with the same
+  // effective result (listInstallmentsForUser's `status` filter is applied
+  // in-memory downstream of an otherwise identical, unfiltered query -- see
+  // payment-service.ts#listInstallmentsForUser).
+  const [sales, installments, pendingPayments] = await Promise.all([
+    listSalesForUser(user, {}),
+    listInstallmentsForUser(user, {}),
     listPendingPaymentsForUser(user, { status: "PENDING_VALIDATION" }),
-    getFinancialSummaryForUser(user),
-    listInstallmentsForUser(user, { status: "OVERDUE" }),
   ]);
 
+  const base = buildSalesDashboardData(sales);
+  const financialSummary = buildFinancialSummary(sales, installments);
+
   const now = new Date();
-  const overdueInstallments = overdueInstallmentRows
+  const overdueInstallments = installments
+    .filter((row) => row.effectiveStatus === InstallmentStatus.OVERDUE)
     .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
     .slice(0, RECENT_LIMIT)
     .map((row) => toOverdueInstallmentItem(row, now));
