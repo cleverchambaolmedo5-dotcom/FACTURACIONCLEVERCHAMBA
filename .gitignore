@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# Passenger restart marker (touched by the postbuild script on Hostinger)
+/tmp/
+
 # production
 /build
 

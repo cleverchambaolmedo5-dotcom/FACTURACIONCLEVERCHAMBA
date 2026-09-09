@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build --webpack",
+    "postbuild": "node -e \"const fs=require('fs');fs.mkdirSync('tmp',{recursive:true});fs.closeSync(fs.openSync('tmp/restart.txt','w'))\"",
     "start": "next start",
     "lint": "eslint",
     "db:seed": "tsx prisma/seed.ts"
