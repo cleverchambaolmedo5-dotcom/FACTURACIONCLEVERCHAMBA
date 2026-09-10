@@ -142,11 +142,24 @@ const saleDetailInclude = {
   bankAccount: { select: { id: true, bankName: true, alias: true, accountNumber: true } },
   installments: {
     orderBy: { installmentNumber: "asc" as const },
-    // `amount`/`validationStatus` (not just `id`) are included so the sale
+    // Full payment rows (not just amount/validationStatus) so the sale
     // detail page can show each installment's approved paid total/pending
-    // total/saldo/estado -- see
-    // src/server/services/payment-service.ts#computeInstallmentTotals.
-    include: { payments: { select: { id: true, amount: true, validationStatus: true } } },
+    // total/saldo/estado (via
+    // src/server/services/payment-service.ts#computeInstallmentTotals) and
+    // also list every individual Payment underneath its cuota (forma de
+    // pago, cuenta, voucher, fecha real, registrado por) -- a cuota paid
+    // through several payments must show each one separately, never
+    // collapsed into a single row.
+    include: {
+      payments: {
+        orderBy: { paymentDate: "desc" as const },
+        include: {
+          bankAccount: { select: { id: true, bankName: true, alias: true } },
+          registeredBy: { select: { id: true, name: true } },
+          receipt: { select: { fileUrl: true } },
+        },
+      },
+    },
   },
   // Absent for sales created before the receipt requirement existed --
   // the detail page must handle a null receipt.

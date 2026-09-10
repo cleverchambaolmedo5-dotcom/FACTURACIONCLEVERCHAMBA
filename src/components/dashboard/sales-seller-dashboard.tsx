@@ -1,4 +1,14 @@
-import { DollarSign, ClipboardList, CheckCircle2, AlertTriangle, Plus, ShoppingCart } from "lucide-react";
+import {
+  DollarSign,
+  ClipboardList,
+  CheckCircle2,
+  AlertTriangle,
+  Plus,
+  ShoppingCart,
+  Wallet,
+  Hourglass,
+  Clock,
+} from "lucide-react";
 import type { PublicUser } from "@/lib/auth/session";
 import type { SellerSalesDashboardData } from "@/server/services/dashboard-service";
 import { DashboardStatCard } from "./dashboard-stat-card";
@@ -30,9 +40,15 @@ export function SalesSellerDashboard({
 
       <RejectedPaymentsAlert payments={data.rejectedPayments} />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
         <DashboardStatCard icon={ShoppingCart} label="Ventas registradas" value={String(data.stats.totalCount)} />
-        <DashboardStatCard icon={ClipboardList} label="Activas" value={String(data.stats.activeCount)} />
+        <DashboardStatCard icon={ClipboardList} label="Pendientes" value={String(data.stats.activeCount)} />
+        <DashboardStatCard
+          icon={Clock}
+          label="Parcialmente pagadas"
+          value={String(data.stats.partiallyPaidCount)}
+          tone="warning"
+        />
         <DashboardStatCard
           icon={CheckCircle2}
           label="Pagadas"
@@ -50,6 +66,21 @@ export function SalesSellerDashboard({
           label="Total vendido"
           value={currencyFormatter.format(data.stats.totalSoldCents / 100)}
           tone="success"
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <DashboardStatCard
+          icon={Wallet}
+          label="Total cobrado"
+          value={currencyFormatter.format(data.financialSummary.collectedCents / 100)}
+          tone="success"
+        />
+        <DashboardStatCard
+          icon={Hourglass}
+          label="Saldo por cobrar"
+          value={currencyFormatter.format(data.financialSummary.pendingToCollectCents / 100)}
+          tone="warning"
         />
       </div>
 

@@ -1,4 +1,16 @@
-import { DollarSign, ClipboardList, CheckCircle2, AlertTriangle, Plus, ShoppingCart, Wallet, Hourglass } from "lucide-react";
+import {
+  DollarSign,
+  ClipboardList,
+  CheckCircle2,
+  AlertTriangle,
+  Plus,
+  ShoppingCart,
+  Wallet,
+  Hourglass,
+  Clock,
+  XCircle,
+  CalendarClock,
+} from "lucide-react";
 import type { PublicUser } from "@/lib/auth/session";
 import type { BankAccountSummaryItem, FinancialSalesDashboardData } from "@/server/services/dashboard-service";
 import { DashboardStatCard } from "./dashboard-stat-card";
@@ -37,9 +49,15 @@ export function SalesAdminDashboard({
         <p className="text-sm text-muted-foreground">Visión global de las ventas.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
         <DashboardStatCard icon={ShoppingCart} label="Total de ventas" value={String(data.stats.totalCount)} />
-        <DashboardStatCard icon={ClipboardList} label="Activas" value={String(data.stats.activeCount)} />
+        <DashboardStatCard icon={ClipboardList} label="Pendientes" value={String(data.stats.activeCount)} />
+        <DashboardStatCard
+          icon={Clock}
+          label="Parcialmente pagadas"
+          value={String(data.stats.partiallyPaidCount)}
+          tone="warning"
+        />
         <DashboardStatCard
           icon={CheckCircle2}
           label="Pagadas"
@@ -72,6 +90,33 @@ export function SalesAdminDashboard({
           label="Total por cobrar"
           value={currencyFormatter.format(data.financialSummary.pendingToCollectCents / 100)}
           tone="warning"
+        />
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <DashboardStatCard
+          icon={ClipboardList}
+          label="Pagos pendientes de aprobación"
+          value={String(data.pendingPaymentsCount)}
+          tone="warning"
+        />
+        <DashboardStatCard
+          icon={CheckCircle2}
+          label="Pagos aprobados"
+          value={String(data.approvedPaymentsCount)}
+          tone="success"
+        />
+        <DashboardStatCard
+          icon={XCircle}
+          label="Pagos rechazados"
+          value={String(data.rejectedPaymentsCount)}
+          tone="error"
+        />
+        <DashboardStatCard
+          icon={CalendarClock}
+          label="Cuotas vencidas"
+          value={String(data.overdueInstallmentsCount)}
+          tone="error"
         />
       </div>
 

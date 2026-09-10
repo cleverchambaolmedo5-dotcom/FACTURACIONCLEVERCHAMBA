@@ -1,87 +1,85 @@
 import Link from "next/link";
-import { CreditCard, Eye } from "lucide-react";
-import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
-import { InstallmentStatus } from "@/generated/prisma/enums";
-import type { DecoratedInstallmentListRow } from "@/server/services/payment-service";
+import { Eye } from "lucide-react";
+import { PaymentMethod } from "@/generated/prisma/enums";
+import type { DecoratedPaymentListRow } from "@/server/services/payment-service";
+import { ValidationStatusBadge } from "@/components/payments/validation-status-badge";
+import { ReceiptLink } from "@/components/payments/receipt-link";
 
 const dateFormatter = new Intl.DateTimeFormat("es-EC", { dateStyle: "medium", timeZone: "UTC" });
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
 
-const STATUS_TONE: Record<InstallmentStatus, StatusTone> = {
-  PENDING: "pending",
-  PARTIALLY_PAID: "warning",
-  PAID: "success",
-  OVERDUE: "error",
+const METHOD_LABELS: Record<PaymentMethod, string> = {
+  CASH: "Efectivo",
+  BANK_TRANSFER: "Transferencia",
+  DEPOSIT: "Depósito",
+  CARD: "Tarjeta",
+  OTHER: "Otro",
 };
 
-const STATUS_LABELS: Record<InstallmentStatus, string> = {
-  PENDING: "Pendiente",
-  PARTIALLY_PAID: "Parcial",
-  PAID: "Pagada",
-  OVERDUE: "Vencida",
-};
-
-export function PaymentTable({ installments }: { installments: DecoratedInstallmentListRow[] }) {
+// One row = one real Payment -- never grouped by installment/cuota. A cuota
+// paid through several payments (e.g. part cash, part transfer) always
+// shows up here as that many separate rows, each with its own forma de
+// pago/cuenta/voucher/fecha real de registro -- see the module design note
+// in payment-service.ts. "Ver cuota" reuses the existing cuota detail route
+// (/pagos/[id]), which already shows this payment inside that cuota's full
+// payment history.
+export function PaymentTable({ payments }: { payments: DecoratedPaymentListRow[] }) {
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-surface">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[1080px] text-left text-sm">
+        <table className="w-full min-w-[1280px] text-left text-sm">
           <thead>
             <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-muted-foreground">
               <th scope="col" className="px-4 py-3">Cliente</th>
               <th scope="col" className="px-4 py-3">Producto</th>
               <th scope="col" className="px-4 py-3">Vendedor</th>
               <th scope="col" className="px-4 py-3">Cuota</th>
-              <th scope="col" className="px-4 py-3">Valor</th>
-              <th scope="col" className="px-4 py-3">Pagado</th>
-              <th scope="col" className="px-4 py-3">Pendiente</th>
-              <th scope="col" className="px-4 py-3">Saldo</th>
-              <th scope="col" className="px-4 py-3">Vencimiento</th>
+              <th scope="col" className="px-4 py-3">Monto pagado</th>
+              <th scope="col" className="px-4 py-3">Forma de pago</th>
+              <th scope="col" className="px-4 py-3">Cuenta bancaria</th>
+              <th scope="col" className="px-4 py-3">Fecha</th>
               <th scope="col" className="px-4 py-3">Estado</th>
+              <th scope="col" className="px-4 py-3">Registrado por</th>
+              <th scope="col" className="px-4 py-3">Voucher</th>
               <th scope="col" className="px-4 py-3 text-right">Acción</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {installments.map((installment) => (
-              <tr key={installment.id} className="hover:bg-black/[0.02]">
-                <td className="px-4 py-3 font-medium text-foreground">{installment.sale.customer.fullName}</td>
-                <td className="px-4 py-3 text-muted-foreground">{installment.sale.product.name}</td>
-                <td className="px-4 py-3 text-muted-foreground">{installment.sale.seller.name}</td>
-                <td className="px-4 py-3 text-muted-foreground">N.° {installment.installmentNumber}</td>
-                <td className="px-4 py-3 text-foreground">{currencyFormatter.format(installment.totalCents / 100)}</td>
-                <td className="px-4 py-3 text-foreground">{currencyFormatter.format(installment.paidCents / 100)}</td>
-                <td className="px-4 py-3 text-warning">
-                  {currencyFormatter.format(installment.pendingCents / 100)}
+            {payments.map((payment) => (
+              <tr key={payment.id} className="hover:bg-black/[0.02]">
+                <td className="px-4 py-3 font-medium text-foreground">
+                  {payment.installment.sale.customer.fullName}
                 </td>
+                <td className="px-4 py-3 text-muted-foreground">{payment.installment.sale.product.name}</td>
+                <td className="px-4 py-3 text-muted-foreground">{payment.installment.sale.seller.name}</td>
+                <td className="px-4 py-3 text-muted-foreground">N.° {payment.installment.installmentNumber}</td>
                 <td className="px-4 py-3 font-semibold text-foreground">
-                  {currencyFormatter.format(installment.balanceCents / 100)}
+                  {currencyFormatter.format(Number(payment.amount))}
                 </td>
-                <td className="px-4 py-3 text-muted-foreground">{dateFormatter.format(installment.dueDate)}</td>
+                <td className="px-4 py-3 text-muted-foreground">{METHOD_LABELS[payment.method]}</td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {payment.bankAccount ? `${payment.bankAccount.bankName} — ${payment.bankAccount.alias}` : "—"}
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">{dateFormatter.format(payment.paymentDate)}</td>
                 <td className="px-4 py-3">
-                  <StatusBadge tone={STATUS_TONE[installment.effectiveStatus]}>
-                    {STATUS_LABELS[installment.effectiveStatus]}
-                  </StatusBadge>
+                  <ValidationStatusBadge status={payment.validationStatus} />
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">{payment.registeredBy.name}</td>
+                <td className="px-4 py-3">
+                  {payment.receipt ? (
+                    <ReceiptLink fileUrl={payment.receipt.fileUrl} />
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <div className="flex justify-end gap-2">
-                    {installment.balanceCents > 0 ? (
-                      <Link
-                        href={`/pagos/${installment.id}#registrar-pago`}
-                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
-                      >
-                        <CreditCard className="size-3.5" aria-hidden />
-                        Pagar
-                      </Link>
-                    ) : (
-                      <Link
-                        href={`/pagos/${installment.id}`}
-                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-black/[0.04] hover:text-foreground"
-                      >
-                        <Eye className="size-3.5" aria-hidden />
-                        Ver
-                      </Link>
-                    )}
-                  </div>
+                  <Link
+                    href={`/pagos/${payment.installment.id}`}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+                  >
+                    <Eye className="size-3.5" aria-hidden />
+                    Ver cuota
+                  </Link>
                 </td>
               </tr>
             ))}

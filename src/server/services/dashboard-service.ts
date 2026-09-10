@@ -100,7 +100,11 @@ function countsAsSold(status: SaleStatus): boolean {
 
 export type SalesDashboardStats = {
   totalCount: number;
+  // "Pendiente" in every visible label (see sale-table.tsx's own
+  // relabeling) -- named activeCount here only because it counts
+  // SaleStatus.ACTIVE rows; never rendered as "Activa".
   activeCount: number;
+  partiallyPaidCount: number;
   paidCount: number;
   overdueCount: number;
   cancelledCount: number;
@@ -114,13 +118,14 @@ export type SalesDashboardData = {
 };
 
 /**
- * Pure aggregation step, split out from getSalesDashboardData below so a
- * caller that already fetched `sales` for another purpose in the same
- * request (see getFinancialSalesDashboardData) can reuse that same array
- * instead of triggering a second, identical listSalesForUser query.
+ * Pure aggregation step, shared by every role's dashboard
+ * (getSellerSalesDashboardData/getFinancialSalesDashboardData below) so
+ * each only fetches `sales` (via listSalesForUser) once and reuses it here,
+ * rather than issuing a second, identical query just to get these totals.
  */
 function buildSalesDashboardData(sales: DecoratedSaleListItem[]): SalesDashboardData {
   const active = sales.filter((sale) => sale.status === SaleStatus.ACTIVE);
+  const partiallyPaid = sales.filter((sale) => sale.status === SaleStatus.PARTIALLY_PAID);
   const paid = sales.filter((sale) => sale.status === SaleStatus.PAID);
   const overdue = sales.filter((sale) => sale.status === SaleStatus.OVERDUE);
   const cancelled = sales.filter((sale) => sale.status === SaleStatus.CANCELLED);
@@ -130,6 +135,7 @@ function buildSalesDashboardData(sales: DecoratedSaleListItem[]): SalesDashboard
     stats: {
       totalCount: sales.length,
       activeCount: active.length,
+      partiallyPaidCount: partiallyPaid.length,
       paidCount: paid.length,
       overdueCount: overdue.length,
       cancelledCount: cancelled.length,
@@ -138,37 +144,6 @@ function buildSalesDashboardData(sales: DecoratedSaleListItem[]): SalesDashboard
     overdueSales: overdue.slice(0, RECENT_LIMIT),
     recentSales: sales.slice(0, RECENT_LIMIT), // already saleDate desc -- see saleRepository.listSales
   };
-}
-
-/**
- * Shared aggregation for every role: listSalesForUser already scopes rows
- * (SELLER only sees their own sales, ADMIN/ACCOUNTANT see all -- see
- * sale-service.ts), so this only computes totals/slices from whatever it
- * returns.
- */
-async function getSalesDashboardData(user: PublicUser): Promise<SalesDashboardData> {
-  const sales = await listSalesForUser(user, {});
-  return buildSalesDashboardData(sales);
-}
-
-export type SellerSalesDashboardData = SalesDashboardData & {
-  // Payments Contabilidad rejected whose installment still needs a
-  // corrected re-registration -- see
-  // payment-service.ts#listRejectedPaymentsNeedingCorrectionForUser. Never
-  // shown on the ADMIN/ACCOUNTANT dashboards (SalesDashboardData itself is
-  // unchanged for them), only added here for the seller-facing "requiere
-  // corrección" alert.
-  rejectedPayments: RejectedPaymentAlert[];
-};
-
-/** SELLER dashboard: their own sales only, same shape as the financial view -- Sale amounts are never field-restricted for SELLER (unlike Inversiones), so there is no separate "seller" data shape to define here, beyond the rejected-payments alert below. */
-export async function getSellerSalesDashboardData(user: PublicUser): Promise<SellerSalesDashboardData> {
-  const [base, rejectedPayments] = await Promise.all([
-    getSalesDashboardData(user),
-    listRejectedPaymentsNeedingCorrectionForUser(user),
-  ]);
-
-  return { ...base, rejectedPayments };
 }
 
 export type FinancialSummary = {
@@ -223,6 +198,38 @@ function buildFinancialSummary(
   };
 }
 
+export type SellerSalesDashboardData = SalesDashboardData & {
+  financialSummary: FinancialSummary;
+  // Payments Contabilidad rejected whose installment still needs a
+  // corrected re-registration -- see
+  // payment-service.ts#listRejectedPaymentsNeedingCorrectionForUser. Never
+  // shown on the ADMIN/ACCOUNTANT dashboards (SalesDashboardData itself is
+  // unchanged for them), only added here for the seller-facing "requiere
+  // corrección" alert.
+  rejectedPayments: RejectedPaymentAlert[];
+};
+
+/**
+ * SELLER dashboard: their own sales only. Adds financialSummary (via the
+ * same buildFinancialSummary used by the ADMIN/ACCOUNTANT view below) so a
+ * seller can answer "¿cuánto he vendido? ¿cuánto he cobrado? ¿cuánto me
+ * falta cobrar?" from this one dashboard -- Sale amounts are never
+ * field-restricted for SELLER (unlike Inversiones), so there is no
+ * permission reason to withhold it here.
+ */
+export async function getSellerSalesDashboardData(user: PublicUser): Promise<SellerSalesDashboardData> {
+  const [sales, installments, rejectedPayments] = await Promise.all([
+    listSalesForUser(user, {}),
+    listInstallmentsForUser(user, {}),
+    listRejectedPaymentsNeedingCorrectionForUser(user),
+  ]);
+
+  const base = buildSalesDashboardData(sales);
+  const financialSummary = buildFinancialSummary(sales, installments);
+
+  return { ...base, financialSummary, rejectedPayments };
+}
+
 function toOverdueInstallmentItem(
   row: DecoratedInstallmentListRow,
   now: Date,
@@ -245,8 +252,19 @@ function toOverdueInstallmentItem(
 
 export type FinancialSalesDashboardData = SalesDashboardData & {
   pendingPayments: DecoratedPaymentListRow[];
+  // Full counts across every Payment the caller can see (never sliced to
+  // RECENT_LIMIT, unlike `pendingPayments` above) -- "Pagos pendientes de
+  // aprobación"/"Pagos aprobados"/"Pagos rechazados" for the Contabilidad/
+  // ADMIN stat cards.
+  pendingPaymentsCount: number;
+  approvedPaymentsCount: number;
+  rejectedPaymentsCount: number;
   financialSummary: FinancialSummary;
   overdueInstallments: OverdueInstallmentItem[];
+  // Full count of cuotas whose effective status is OVERDUE (never sliced),
+  // distinct from `stats.overdueCount` (sale-level: a sale with any overdue
+  // cuota) -- "Cuotas vencidas" for the Contabilidad/ADMIN stat cards.
+  overdueInstallmentsCount: number;
 };
 
 /**
@@ -266,18 +284,28 @@ export async function getFinancialSalesDashboardData(
   // effective result (listInstallmentsForUser's `status` filter is applied
   // in-memory downstream of an otherwise identical, unfiltered query -- see
   // payment-service.ts#listInstallmentsForUser).
-  const [sales, installments, pendingPayments] = await Promise.all([
+  const [sales, installments, allPayments] = await Promise.all([
     listSalesForUser(user, {}),
     listInstallmentsForUser(user, {}),
-    listPendingPaymentsForUser(user, { status: "PENDING_VALIDATION" }),
+    // Unfiltered (every validationStatus) so pending/approved/rejected
+    // counts below all come from this one fetch -- see the module design
+    // note in payment-service.ts (only APPROVED ever counts toward money
+    // collected, but every status is shown here for visibility).
+    listPendingPaymentsForUser(user, {}),
   ]);
 
   const base = buildSalesDashboardData(sales);
   const financialSummary = buildFinancialSummary(sales, installments);
 
+  const pendingPayments = allPayments.filter((p) => p.validationStatus === "PENDING_VALIDATION");
+  const approvedPayments = allPayments.filter((p) => p.validationStatus === "APPROVED");
+  const rejectedPayments = allPayments.filter((p) => p.validationStatus === "REJECTED");
+
   const now = new Date();
-  const overdueInstallments = installments
-    .filter((row) => row.effectiveStatus === InstallmentStatus.OVERDUE)
+  const allOverdueInstallments = installments.filter(
+    (row) => row.effectiveStatus === InstallmentStatus.OVERDUE,
+  );
+  const overdueInstallments = allOverdueInstallments
     .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
     .slice(0, RECENT_LIMIT)
     .map((row) => toOverdueInstallmentItem(row, now));
@@ -285,8 +313,12 @@ export async function getFinancialSalesDashboardData(
   return {
     ...base,
     pendingPayments: pendingPayments.slice(0, RECENT_LIMIT),
+    pendingPaymentsCount: pendingPayments.length,
+    approvedPaymentsCount: approvedPayments.length,
+    rejectedPaymentsCount: rejectedPayments.length,
     financialSummary,
     overdueInstallments,
+    overdueInstallmentsCount: allOverdueInstallments.length,
   };
 }
 

@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { CreditCard } from "lucide-react";
 import { requireModuleAccess } from "@/lib/auth/guards";
 import { UserRole } from "@/generated/prisma/enums";
 import {
-  listInstallmentsForUser,
+  listPendingPaymentsForUser,
   listProductsForPaymentFilters,
   listSellersForPaymentFilters,
 } from "@/server/services/payment-service";
@@ -32,11 +34,13 @@ export default async function PagosPage({
   const search = q?.trim() || undefined;
   const isAdmin = user.role === UserRole.ADMIN;
 
-  // listInstallmentsForUser scopes to the caller's own sales for SELLER --
-  // see src/server/services/payment-service.ts. Never trust the listing
-  // alone as a security boundary; the detail route re-checks ownership too.
-  const [installments, products, sellers] = await Promise.all([
-    listInstallmentsForUser(user, { search, productId, status, dateFrom, dateTo, sellerId }),
+  // listPendingPaymentsForUser scopes to the caller's own sales for SELLER
+  // -- see src/server/services/payment-service.ts. One row is always one
+  // real Payment (never grouped by cuota), which is what tells Pagos apart
+  // from the per-cuota Cuotas listing. Never trust the listing alone as a
+  // security boundary; the detail route re-checks ownership too.
+  const [payments, products, sellers] = await Promise.all([
+    listPendingPaymentsForUser(user, { search, productId, status, dateFrom, dateTo, sellerId }),
     listProductsForPaymentFilters(),
     isAdmin ? listSellersForPaymentFilters() : Promise.resolve(undefined),
   ]);
@@ -45,11 +49,21 @@ export default async function PagosPage({
 
   return (
     <div className="flex flex-1 flex-col gap-6">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">Pagos</h2>
-        <p className="text-sm text-muted-foreground">
-          Cuotas de ventas, saldos pendientes y registro de pagos.
-        </p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Pagos</h2>
+          <p className="text-sm text-muted-foreground">
+            Pagos individuales registrados contra las cuotas de una venta, con su forma de pago y estado de
+            aprobación.
+          </p>
+        </div>
+        <Link
+          href="/cuotas"
+          className="inline-flex w-fit items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark"
+        >
+          <CreditCard className="size-3.5" aria-hidden />
+          Registrar pago
+        </Link>
       </div>
 
       {pago === "registrado" && (
@@ -71,10 +85,10 @@ export default async function PagosPage({
         />
       </form>
 
-      {installments.length === 0 ? (
+      {payments.length === 0 ? (
         <PaymentEmptyState hasFilters={hasFilters} />
       ) : (
-        <PaymentTable installments={installments} />
+        <PaymentTable payments={payments} />
       )}
     </div>
   );

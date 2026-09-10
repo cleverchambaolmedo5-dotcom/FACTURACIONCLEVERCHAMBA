@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { Eye, CheckCircle2, Clock, AlertTriangle } from "lucide-react";
-import type { DecoratedSaleListItem, DecoratedSaleInstallment } from "@/server/services/sale-service";
+import { Eye } from "lucide-react";
+import type { DecoratedSaleListItem } from "@/server/services/sale-service";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
-import { SaleStatus, InstallmentStatus } from "@/generated/prisma/enums";
+import { SaleStatus } from "@/generated/prisma/enums";
 
 const dateFormatter = new Intl.DateTimeFormat("es-EC", { dateStyle: "medium", timeZone: "UTC" });
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
@@ -26,34 +26,6 @@ const STATUS_LABELS: Record<SaleStatus, string> = {
   OVERDUE: "Vencida",
   CANCELLED: "Cancelada",
 };
-
-const INSTALLMENT_ICON: Record<InstallmentStatus, typeof CheckCircle2> = {
-  PAID: CheckCircle2,
-  PARTIALLY_PAID: Clock,
-  PENDING: Clock,
-  OVERDUE: AlertTriangle,
-};
-
-const INSTALLMENT_ICON_CLASS: Record<InstallmentStatus, string> = {
-  PAID: "text-success",
-  PARTIALLY_PAID: "text-warning",
-  PENDING: "text-muted-foreground",
-  OVERDUE: "text-error",
-};
-
-/** One "C1 $300" row inside the compact Cuotas cell, with an icon for its real (APPROVED-payments-based) status -- never just the stored/possibly-stale status column. */
-function InstallmentBadgeRow({ installment }: { installment: DecoratedSaleInstallment }) {
-  const Icon = INSTALLMENT_ICON[installment.effectiveStatus];
-  return (
-    <div className="flex items-center gap-1 whitespace-nowrap">
-      <Icon className={`size-3.5 shrink-0 ${INSTALLMENT_ICON_CLASS[installment.effectiveStatus]}`} aria-hidden />
-      <span className="text-muted-foreground">C{installment.installmentNumber}</span>
-      <span className="font-medium text-foreground">
-        {currencyFormatter.format(installment.totalCents / 100)}
-      </span>
-    </div>
-  );
-}
 
 export function SaleTable({ sales, showSeller }: { sales: DecoratedSaleListItem[]; showSeller: boolean }) {
   return (
@@ -87,13 +59,7 @@ export function SaleTable({ sales, showSeller }: { sales: DecoratedSaleListItem[
                 <td className="px-4 py-3 font-semibold text-foreground">
                   {currencyFormatter.format(sale.finalPriceCents / 100)}
                 </td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-col gap-0.5 text-xs">
-                    {sale.installments.map((installment) => (
-                      <InstallmentBadgeRow key={installment.id} installment={installment} />
-                    ))}
-                  </div>
-                </td>
+                <td className="px-4 py-3 text-foreground">{sale.installments.length}</td>
                 <td className="px-4 py-3 text-foreground">
                   {currencyFormatter.format(sale.paidCents / 100)}
                 </td>
@@ -107,13 +73,13 @@ export function SaleTable({ sales, showSeller }: { sales: DecoratedSaleListItem[
                 <td className="px-4 py-3">
                   {sale.nextInstallment ? (
                     <div className="whitespace-nowrap">
-                      <span className="font-medium text-foreground">
+                      <p className="font-medium text-foreground">
                         C{sale.nextInstallment.installmentNumber} ·{" "}
                         {currencyFormatter.format(sale.nextInstallment.balanceCents / 100)}
-                      </span>
-                      {sale.nextInstallment.paidCents > 0 && (
-                        <p className="text-xs text-muted-foreground">pendiente</p>
-                      )}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {dateFormatter.format(sale.nextInstallment.dueDate)}
+                      </p>
                     </div>
                   ) : (
                     <span className="text-xs text-success">Sin saldo pendiente</span>

@@ -809,16 +809,20 @@ function isValidPaymentValidationStatus(
 export type DecoratedPaymentListRow = PaymentListRow;
 
 /**
- * Lists individual payments (not installments) for the Comprobantes
- * validation panel. The module itself is ADMIN/ACCOUNTANT-only (see
- * MODULE_ACCESS in rbac.ts, enforced by requireModuleAccess("comprobantes")
- * in the caller) so both roles see every payment; `sellerId` scoping is
- * kept here anyway as defense in depth, mirroring listInstallmentsForUser.
+ * Lists individual Payment rows (not installments) -- shared by the Pagos
+ * listing (every role that can reach "pagos", SELLER scoped to their own
+ * sales -- see MODULE_ACCESS.pagos in rbac.ts) and the Comprobantes
+ * validation panel (ADMIN/ACCOUNTANT-only, enforced by the caller's
+ * requireModuleAccess("comprobantes") check; `sellerId` scoping is kept
+ * here anyway as defense in depth, mirroring listInstallmentsForUser). Every
+ * row is one real Payment -- a cuota paid through several payments (e.g.
+ * part cash, part transfer) is never collapsed into one row here.
  */
 export async function listPendingPaymentsForUser(
   user: PublicUser,
   filters: {
     search?: string;
+    productId?: string;
     status?: string;
     dateFrom?: string;
     dateTo?: string;
@@ -838,6 +842,7 @@ export async function listPendingPaymentsForUser(
 
   return paymentRepository.listPayments({
     sellerId,
+    productId: filters.productId && isValidUuid(filters.productId) ? filters.productId : undefined,
     status,
     search: filters.search,
     dateFrom,

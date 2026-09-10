@@ -8,12 +8,12 @@ export function PaymentEmptyState({ hasFilters }: { hasFilters: boolean }) {
       </div>
       <div className="space-y-1.5">
         <h2 className="text-lg font-semibold text-foreground">
-          {hasFilters ? "Sin resultados" : "Todavía no hay cuotas"}
+          {hasFilters ? "Sin resultados" : "Todavía no hay pagos registrados"}
         </h2>
         <p className="max-w-sm text-sm text-muted-foreground">
           {hasFilters
-            ? "No se encontró ninguna cuota que coincida con la búsqueda o los filtros."
-            : "Las cuotas aparecerán aquí una vez que se registren ventas."}
+            ? "No se encontró ningún pago que coincida con la búsqueda o los filtros."
+            : "Los pagos aparecerán aquí a medida que se registren contra las cuotas de una venta."}
         </p>
       </div>
     </div>

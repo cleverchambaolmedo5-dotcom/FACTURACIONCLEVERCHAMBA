@@ -1,11 +1,5 @@
-import { InstallmentStatus } from "@/generated/prisma/enums";
-
-const STATUS_LABELS: Record<InstallmentStatus, string> = {
-  PENDING: "Pendiente",
-  PARTIALLY_PAID: "Parcial",
-  PAID: "Pagada",
-  OVERDUE: "Vencida",
-};
+import { PaymentValidationStatus } from "@/generated/prisma/enums";
+import { VALIDATION_STATUS_LABELS } from "@/components/payments/validation-status-badge";
 
 const selectClass =
   "rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary";
@@ -53,9 +47,9 @@ export function PaymentFilters({
         </label>
         <select id="status" name="status" defaultValue={defaultStatus ?? ""} className={selectClass}>
           <option value="">Todos</option>
-          {Object.entries(STATUS_LABELS).map(([value, label]) => (
+          {Object.values(PaymentValidationStatus).map((value) => (
             <option key={value} value={value}>
-              {label}
+              {VALIDATION_STATUS_LABELS[value]}
             </option>
           ))}
         </select>

@@ -102,6 +102,12 @@ const installmentDetailInclude = {
     include: {
       registeredBy: { select: { id: true, name: true } },
       validatedBy: { select: { id: true, name: true } },
+      // The account this specific payment landed in (see
+      // Payment.bankAccountId in schema.prisma) -- shown alongside the
+      // voucher/método on the cuota detail page's payment history so a
+      // mixed-method cuota (e.g. part cash, part transfer) shows each
+      // payment's own account, never a single sale-wide one.
+      bankAccount: { select: { id: true, bankName: true, alias: true } },
       receipt: true,
     },
   },
@@ -250,19 +256,26 @@ const paymentListInclude = {
     },
   },
   registeredBy: { select: { id: true, name: true } },
+  // The account this specific payment landed in -- see the same field on
+  // installmentDetailInclude.payments above; CASH payments simply have no
+  // bankAccount (null).
+  bankAccount: { select: { id: true, bankName: true, alias: true } },
   receipt: { select: { id: true, fileUrl: true } },
 } as const;
 
 export type PaymentListRow = Awaited<ReturnType<typeof listPayments>>[number];
 
 /**
- * Lists individual Payment rows (not installments) for the Comprobantes
- * validation panel -- ADMIN/ACCOUNTANT only (enforced by the caller's
- * requireModuleAccess("comprobantes") check, `sellerId` is only ever
- * passed for defense in depth).
+ * Lists individual Payment rows (not installments) -- shared by the Pagos
+ * listing (every role, `sellerId` scoping SELLER to their own sales) and the
+ * Comprobantes validation panel (ADMIN/ACCOUNTANT only, `sellerId` there
+ * only for defense in depth). One row is always exactly one Payment, never
+ * grouped by installment, so a cuota paid through several Payments (e.g.
+ * part cash, part transfer) always surfaces as that many separate rows.
  */
 export async function listPayments(params: {
   sellerId?: string;
+  productId?: string;
   status?: PaymentValidationStatus;
   search?: string;
   dateFrom?: Date;
@@ -276,6 +289,7 @@ export async function listPayments(params: {
       installment: {
         sale: {
           ...(params.sellerId ? { sellerId: params.sellerId } : {}),
+          ...(params.productId ? { productId: params.productId } : {}),
           ...(search
             ? {
                 OR: [

@@ -5,6 +5,7 @@ import { getSaleForUser } from "@/server/services/sale-service";
 import { computeInstallmentTotals } from "@/server/services/payment-service";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { SaleInstallments } from "@/components/sales/sale-installments";
+import { PaymentHistory } from "@/components/payments/payment-history";
 import { ReceiptLink } from "@/components/payments/receipt-link";
 import { SaleStatus } from "@/generated/prisma/enums";
 import { siteConfig } from "@/config/site";
@@ -48,6 +49,18 @@ export default async function VentaDetallePage({
   if (!sale) {
     notFound();
   }
+
+  // Same "cents are the source of truth" totals used everywhere else in
+  // Ventas/Cuotas (see sale-service.ts#decorateSaleListItem) -- computed
+  // once here and reused for both the RESUMEN block and the per-cuota
+  // PAGOS section below, never re-derived separately.
+  const now = new Date();
+  const decoratedInstallments = sale.installments.map((installment) =>
+    computeInstallmentTotals(installment, now),
+  );
+  const finalPriceCents = Math.round(Number(sale.finalPrice) * 100);
+  const paidCents = decoratedInstallments.reduce((sum, installment) => sum + installment.paidCents, 0);
+  const balanceCents = finalPriceCents - paidCents;
 
   return (
     <div className="flex flex-1 flex-col gap-6">
@@ -100,11 +113,23 @@ export default async function VentaDetallePage({
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Descuento</dt>
           <dd className="text-sm text-foreground">{currencyFormatter.format(Number(sale.discount))}</dd>
         </div>
-        <div className="sm:col-span-2">
+        <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Precio final
           </dt>
           <dd className="text-2xl font-bold text-primary">{currencyFormatter.format(Number(sale.finalPrice))}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total pagado</dt>
+          <dd className="text-2xl font-bold text-success">{currencyFormatter.format(paidCents / 100)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Saldo pendiente
+          </dt>
+          <dd className="text-2xl font-bold text-foreground">
+            {balanceCents > 0 ? currencyFormatter.format(balanceCents / 100) : "$0,00"}
+          </dd>
         </div>
       </div>
 
@@ -124,11 +149,19 @@ export default async function VentaDetallePage({
 
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-foreground">Cuotas</h3>
-        <SaleInstallments
-          installments={sale.installments.map((installment) =>
-            computeInstallmentTotals(installment, new Date()),
-          )}
-        />
+        <SaleInstallments installments={decoratedInstallments} />
+      </div>
+
+      <div className="space-y-6">
+        <h3 className="text-sm font-semibold text-foreground">Pagos</h3>
+        {decoratedInstallments.map((installment) => (
+          <div key={installment.id} className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Cuota {installment.installmentNumber} · {currencyFormatter.format(installment.totalCents / 100)}
+            </p>
+            <PaymentHistory payments={installment.payments} viewerRole={user.role} />
+          </div>
+        ))}
       </div>
     </div>
   );
