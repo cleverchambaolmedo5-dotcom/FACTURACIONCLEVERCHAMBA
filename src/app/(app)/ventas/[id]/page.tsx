@@ -23,7 +23,9 @@ const STATUS_TONE: Record<SaleStatus, StatusTone> = {
 };
 
 const STATUS_LABELS: Record<SaleStatus, string> = {
-  ACTIVE: "Activa",
+  // Mirrors sale-table.tsx's own relabeling -- ACTIVE means "no payment
+  // approved yet", shown as "Pendiente" everywhere in Ventas.
+  ACTIVE: "Pendiente",
   PARTIALLY_PAID: "Parcialmente pagada",
   PAID: "Pagada",
   OVERDUE: "Vencida",

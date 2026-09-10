@@ -3,11 +3,13 @@ import { UserRole, SaleStatus, PaymentMethod } from "@/generated/prisma/enums";
 import type { PublicUser } from "@/lib/auth/session";
 import { isValidUuid } from "@/lib/validation";
 import * as saleRepository from "@/server/repositories/sale-repository";
+import type { SaleListItem } from "@/server/repositories/sale-repository";
 import * as customerRepository from "@/server/repositories/customer-repository";
 import * as bankAccountRepository from "@/server/repositories/bank-account-repository";
 import * as customerService from "@/server/services/customer-service";
 import type { CustomerActionResult, RawCustomerInput } from "@/server/services/customer-service";
-import { sumApprovedCents } from "@/server/services/payment-service";
+import { sumApprovedCents, computeInstallmentTotals } from "@/server/services/payment-service";
+import type { InstallmentWithTotals } from "@/server/services/payment-service";
 import {
   MAX_RECEIPT_BYTES,
   deleteReceiptFile,
@@ -197,8 +199,52 @@ function resolveSaleSellerScope(user: PublicUser, filters: { sellerId?: string }
   return undefined;
 }
 
+export type DecoratedSaleInstallment = InstallmentWithTotals<SaleListItem["installments"][number]>;
+
+export type DecoratedSaleListItem = Omit<SaleListItem, "installments"> & {
+  // Full agreed price, in cents -- same figure as `finalPrice`, just already
+  // converted so the table never re-parses a Decimal string.
+  finalPriceCents: number;
+  // Sum of APPROVED payments across every installment -- the real "total
+  // pagado", never the sum of cuotas (see the module design note in
+  // payment-service.ts: an installment's own `amount` is what was agreed,
+  // not what was collected).
+  paidCents: number;
+  // finalPriceCents - paidCents. Computed from real Payments, not just from
+  // whichever installments are still PENDING/PARTIALLY_PAID by status.
+  balanceCents: number;
+  installments: DecoratedSaleInstallment[];
+  // The first installment (in installmentNumber order) that still has a
+  // balance -- never a fully-paid one, even if a later cuota happens to be
+  // unpaid too. Null once every cuota is fully paid.
+  nextInstallment: DecoratedSaleInstallment | null;
+};
+
+/**
+ * Decorates one sale-list row with real paid/pending totals and the "próxima
+ * cuota" -- reuses payment-service.ts#computeInstallmentTotals (the exact
+ * same APPROVED-only math the sale detail page and Cuotas module already
+ * use) rather than re-deriving it from the stored Installment/Sale status
+ * columns, which only reflect the ledger as of the last write.
+ */
+function decorateSaleListItem(sale: SaleListItem, now: Date): DecoratedSaleListItem {
+  const installments = sale.installments.map((installment) => computeInstallmentTotals(installment, now));
+  const finalPriceCents = toCents(Number(sale.finalPrice));
+  const paidCents = installments.reduce((sum, installment) => sum + installment.paidCents, 0);
+  const nextInstallment = installments.find((installment) => installment.balanceCents > 0) ?? null;
+
+  return {
+    ...sale,
+    installments,
+    finalPriceCents,
+    paidCents,
+    balanceCents: finalPriceCents - paidCents,
+    nextInstallment,
+  };
+}
+
 /** SELLER sees only their own sales; ADMIN/ACCOUNTANT see all (optionally narrowed to one seller via `filters.sellerId`). */
-export function listSalesForUser(
+export async function listSalesForUser(
   user: PublicUser,
   filters: {
     search?: string;
@@ -208,13 +254,13 @@ export function listSalesForUser(
     dateTo?: string;
     sellerId?: string;
   },
-) {
+): Promise<DecoratedSaleListItem[]> {
   const sellerId = resolveSaleSellerScope(user, filters);
   const status = isValidSaleStatus(filters.status) ? filters.status : undefined;
   const dateFrom = filters.dateFrom ? (parseDateOnly(filters.dateFrom) ?? undefined) : undefined;
   const dateTo = filters.dateTo ? (parseDateOnly(filters.dateTo) ?? undefined) : undefined;
 
-  return saleRepository.listSales({
+  const sales = await saleRepository.listSales({
     sellerId,
     search: filters.search,
     productId: filters.productId && isValidUuid(filters.productId) ? filters.productId : undefined,
@@ -222,6 +268,9 @@ export function listSalesForUser(
     dateFrom,
     dateTo,
   });
+
+  const now = new Date();
+  return sales.map((sale) => decorateSaleListItem(sale, now));
 }
 
 /**

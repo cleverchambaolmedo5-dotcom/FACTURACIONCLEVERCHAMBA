@@ -8,7 +8,7 @@ import type {
   InvestmentSellerListItem,
 } from "@/server/repositories/investment-repository";
 import { listSalesForUser } from "@/server/services/sale-service";
-import type { SaleListItem } from "@/server/repositories/sale-repository";
+import type { DecoratedSaleListItem } from "@/server/services/sale-service";
 import {
   listPendingPaymentsForUser,
   listInstallmentsForUser,
@@ -109,8 +109,8 @@ export type SalesDashboardStats = {
 
 export type SalesDashboardData = {
   stats: SalesDashboardStats;
-  overdueSales: SaleListItem[];
-  recentSales: SaleListItem[];
+  overdueSales: DecoratedSaleListItem[];
+  recentSales: DecoratedSaleListItem[];
 };
 
 /**
@@ -119,7 +119,7 @@ export type SalesDashboardData = {
  * request (see getFinancialSalesDashboardData) can reuse that same array
  * instead of triggering a second, identical listSalesForUser query.
  */
-function buildSalesDashboardData(sales: SaleListItem[]): SalesDashboardData {
+function buildSalesDashboardData(sales: DecoratedSaleListItem[]): SalesDashboardData {
   const active = sales.filter((sale) => sale.status === SaleStatus.ACTIVE);
   const paid = sales.filter((sale) => sale.status === SaleStatus.PAID);
   const overdue = sales.filter((sale) => sale.status === SaleStatus.OVERDUE);
@@ -209,7 +209,7 @@ export type OverdueInstallmentItem = {
  * listInstallmentsForUser round-trip for the exact same rows.
  */
 function buildFinancialSummary(
-  sales: SaleListItem[],
+  sales: DecoratedSaleListItem[],
   installments: DecoratedInstallmentListRow[],
 ): FinancialSummary {
   const soldSaleIds = new Set(

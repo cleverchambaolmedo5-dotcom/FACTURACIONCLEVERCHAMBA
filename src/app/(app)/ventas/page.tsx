@@ -100,7 +100,7 @@ export default async function VentasPage({
       {sales.length === 0 ? (
         <SaleEmptyState hasQuery={hasFilters} canCreate={canCreate} />
       ) : (
-        <SaleTable sales={sales} />
+        <SaleTable sales={sales} showSeller={isAccounting} />
       )}
     </div>
   );

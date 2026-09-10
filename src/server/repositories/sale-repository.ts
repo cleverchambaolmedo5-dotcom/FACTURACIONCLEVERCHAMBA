@@ -17,7 +17,23 @@ const saleListSelect = {
   customer: { select: { id: true, fullName: true } },
   product: { select: { id: true, name: true } },
   seller: { select: { id: true, name: true } },
-  installments: { select: { id: true } },
+  // `amount`/`dueDate`/`payments` (not just `id`) so sale-service.ts's
+  // listSalesForUser can decorate each row with real paid/pending totals
+  // and identify the next cuota with a balance -- via
+  // payment-service.ts#computeInstallmentTotals, the same math the sale
+  // detail page and Cuotas module already use. Ordered by installmentNumber
+  // so "próxima cuota" is always the first one with a balance, in cuota
+  // order.
+  installments: {
+    orderBy: { installmentNumber: "asc" as const },
+    select: {
+      id: true,
+      installmentNumber: true,
+      amount: true,
+      dueDate: true,
+      payments: { select: { amount: true, validationStatus: true } },
+    },
+  },
   // Absent for sales created before this field existed -- see
   // Sale.bankAccountId in schema.prisma.
   bankAccount: { select: { id: true, bankName: true, alias: true } },

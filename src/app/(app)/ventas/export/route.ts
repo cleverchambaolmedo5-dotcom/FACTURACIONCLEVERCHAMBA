@@ -4,7 +4,9 @@ import type { SaleExportRow } from "@/server/services/sale-service";
 import { buildXlsxFile, xlsxResponse, exportTimestamp } from "@/server/services/excel-export";
 
 const STATUS_LABELS: Record<SaleExportRow["status"], string> = {
-  ACTIVE: "Activa",
+  // Mirrors sale-table.tsx's own relabeling -- ACTIVE means "no payment
+  // approved yet", shown as "Pendiente" everywhere in Ventas.
+  ACTIVE: "Pendiente",
   PARTIALLY_PAID: "Parcialmente pagada",
   PAID: "Pagada",
   OVERDUE: "Vencida",

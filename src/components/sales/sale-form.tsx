@@ -3,6 +3,7 @@
 import { useActionState, useMemo, useRef, useState, type FormEvent } from "react";
 import { PaymentMethod, UserRole } from "@/generated/prisma/enums";
 import type { SaleFormState } from "@/app/(app)/ventas/actions";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { CustomerSelector, type CustomerSearchResult } from "./customer-selector";
 import type { NewCustomerAction } from "./customer-create-modal";
 
@@ -46,6 +47,12 @@ const MIXED = "MIXED" as const;
 // Business rule: no more than 3 cuotas per sale (matches
 // sale-service.ts's ALLOWED_INSTALLMENT_COUNTS).
 const MAX_INSTALLMENTS = 3;
+
+// Options for the "Número de cuotas" selector -- mirrors
+// sale-service.ts's ALLOWED_INSTALLMENT_COUNTS exactly (1 through
+// MAX_INSTALLMENTS), so the selector can never offer a value the server
+// would reject.
+const INSTALLMENT_COUNT_OPTIONS = Array.from({ length: MAX_INSTALLMENTS }, (_, i) => i + 1);
 
 export type SaleFormAction = (
   state: SaleFormState,
@@ -120,9 +127,10 @@ function addDaysToDateInput(base: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-function resizeArray<T>(previous: T[], count: number, fill: () => T): T[] {
+/** `fill` receives the new element's index (not just the final length) so a direct jump (e.g. 1 -> 3 cuotas via the "Número de cuotas" selector) fills each new slot correctly, not just a single-step +1. */
+function resizeArray<T>(previous: T[], count: number, fill: (index: number) => T): T[] {
   const next = previous.slice(0, count);
-  while (next.length < count) next.push(fill());
+  while (next.length < count) next.push(fill(next.length));
   return next;
 }
 
@@ -214,9 +222,11 @@ export function SaleForm({
   const [discount, setDiscount] = useState("0");
   const [saleDate, setSaleDate] = useState(defaultSaleDate);
 
-  // --- Cuotas: start with only Cuota 1. The seller adds more one at a time
-  // via "+ Agregar otra cuota", up to MAX_INSTALLMENTS -- cuotas are never
-  // created automatically just because a balance would be left pending.
+  // --- Cuotas: the seller first decides how many cuotas the sale was
+  // agreed in, via the "Número de cuotas" selector (1 to MAX_INSTALLMENTS).
+  // Changing it resizes every per-cuota array below to match -- cuotas are
+  // never created automatically just because a balance would be left
+  // pending.
   const [installmentsCount, setInstallmentsCount] = useState<number>(1);
   const [dueDates, setDueDates] = useState<string[]>([defaultSaleDate]);
   // Tracks which due-date inputs the user has hand-edited, so changing
@@ -487,33 +497,21 @@ export function SaleForm({
     }
   }
 
-  function handleAddCuota() {
-    if (installmentsCount >= MAX_INSTALLMENTS) return;
-    const count = installmentsCount + 1;
-    setInstallmentsCount(count);
+/** Handles the "Número de cuotas" selector -- can jump directly between any two counts (e.g. 1 -> 3), not just +/-1, so every derived array is resized (grown or shrunk) to the new count in one step. */
+  function handleInstallmentsCountChange(rawValue: string) {
+    const nextCount = Number(rawValue);
+    if (!INSTALLMENT_COUNT_OPTIONS.includes(nextCount) || nextCount === installmentsCount) return;
+
+    setInstallmentsCount(nextCount);
     setDueDates((previous) =>
-      resizeArray(previous, count, () => addDaysToDateInput(saleDate, INSTALLMENT_OFFSET_DAYS[previous.length])),
+      resizeArray(previous, nextCount, (index) => addDaysToDateInput(saleDate, INSTALLMENT_OFFSET_DAYS[index])),
     );
-    setTouched((previous) => resizeArray(previous, count, () => false));
-    setCuotaPayments((previous) => resizeArray(previous, count, () => emptyCuotaPaymentState()));
-    paymentReceiptRefs.current = resizeArray(paymentReceiptRefs.current, count, () => []);
+    setTouched((previous) => resizeArray(previous, nextCount, () => false));
+    setCuotaPayments((previous) => resizeArray(previous, nextCount, () => emptyCuotaPaymentState()));
+    paymentReceiptRefs.current = resizeArray(paymentReceiptRefs.current, nextCount, () => []);
 
     if (!firstInstallmentTouched) {
-      setFirstInstallmentAmount(defaultFirstInstallmentAmount(finalPriceCents, count));
-    }
-  }
-
-  function handleRemoveCuota() {
-    if (installmentsCount <= 1) return;
-    const count = installmentsCount - 1;
-    setInstallmentsCount(count);
-    setDueDates((previous) => previous.slice(0, count));
-    setTouched((previous) => previous.slice(0, count));
-    setCuotaPayments((previous) => previous.slice(0, count));
-    paymentReceiptRefs.current = paymentReceiptRefs.current.slice(0, count);
-
-    if (!firstInstallmentTouched) {
-      setFirstInstallmentAmount(defaultFirstInstallmentAmount(finalPriceCents, count));
+      setFirstInstallmentAmount(defaultFirstInstallmentAmount(finalPriceCents, nextCount));
     }
   }
 
@@ -822,8 +820,26 @@ export function SaleForm({
       </div>
 
       <div className="space-y-3">
-        <label className="text-sm font-medium text-foreground">Cuotas</label>
-        <input type="hidden" name="installments" value={installmentsCount} />
+        <div className="space-y-1">
+          <label htmlFor="installmentsCount" className="text-sm font-medium text-foreground">
+            Número de cuotas
+          </label>
+          <input type="hidden" name="installments" value={installmentsCount} />
+          <select
+            id="installmentsCount"
+            value={installmentsCount}
+            onChange={(event) => handleInstallmentsCountChange(event.target.value)}
+            disabled={pending}
+            className={fieldClass(!!errors?.installments)}
+          >
+            {INSTALLMENT_COUNT_OPTIONS.map((count) => (
+              <option key={count} value={count}>
+                {count} {count === 1 ? "cuota" : "cuotas"}
+              </option>
+            ))}
+          </select>
+          {errors?.installments && <p className="text-sm text-error">{errors.installments}</p>}
+        </div>
         <div className="space-y-3">
           {Array.from({ length: installmentsCount }).map((_, index) => {
             const cuotaAmountCents = installmentAmountCentsPreview[index] ?? 0;
@@ -880,11 +896,15 @@ export function SaleForm({
                   </div>
                 ) : (
                   <div className="mt-2 space-y-1">
-                    <span className="text-sm font-medium text-foreground">
-                      Monto acordado <span className="font-normal text-muted-foreground">(calculado automáticamente)</span>
+                    <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      Monto acordado
+                      <StatusBadge tone="neutral">Automático</StatusBadge>
                     </span>
-                    <p className="rounded-md border border-border bg-black/[0.02] px-3 py-2 text-sm text-foreground">
+                    <p className="rounded-md border border-dashed border-border bg-black/[0.02] px-3 py-2 text-sm text-foreground">
                       {currencyFormatter.format(cuotaAmountCents / 100)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Calculado automáticamente a partir del saldo restante.
                     </p>
                   </div>
                 )}
@@ -996,28 +1016,6 @@ export function SaleForm({
             );
           })}
         </div>
-
-        <div className="flex items-center gap-4">
-          <button
-            type="button"
-            onClick={handleAddCuota}
-            disabled={pending || installmentsCount >= MAX_INSTALLMENTS}
-            className="text-sm font-medium text-primary transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            + Agregar otra cuota
-          </button>
-          {installmentsCount > 1 && (
-            <button
-              type="button"
-              onClick={handleRemoveCuota}
-              disabled={pending}
-              className="text-sm font-medium text-error transition-colors hover:underline"
-            >
-              Quitar cuota {installmentsCount}
-            </button>
-          )}
-        </div>
-        {errors?.installments && <p className="text-sm text-error">{errors.installments}</p>}
       </div>
 
       <div className="rounded-lg border border-border bg-black/[0.02] p-4">

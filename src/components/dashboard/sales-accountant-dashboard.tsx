@@ -106,7 +106,7 @@ export function SalesAccountantDashboard({
         isEmpty={data.overdueSales.length === 0}
         emptyMessage="No hay ventas vencidas."
       >
-        <SaleTable sales={data.overdueSales} />
+        <SaleTable sales={data.overdueSales} showSeller />
       </DashboardSection>
     </div>
   );

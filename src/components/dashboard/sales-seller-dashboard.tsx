@@ -68,7 +68,7 @@ export function SalesSellerDashboard({
         isEmpty={data.overdueSales.length === 0}
         emptyMessage="No tienes ventas vencidas."
       >
-        <SaleTable sales={data.overdueSales} />
+        <SaleTable sales={data.overdueSales} showSeller={false} />
       </DashboardSection>
 
       <DashboardSection
@@ -78,7 +78,7 @@ export function SalesSellerDashboard({
         isEmpty={data.recentSales.length === 0}
         emptyMessage="Todavía no has registrado ventas."
       >
-        <SaleTable sales={data.recentSales} />
+        <SaleTable sales={data.recentSales} showSeller={false} />
       </DashboardSection>
     </div>
   );
