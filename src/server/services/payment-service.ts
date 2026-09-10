@@ -26,6 +26,10 @@ import {
   saveReceiptFile,
   validateReceiptFile,
 } from "@/server/services/receipt-storage";
+// Reused (never re-implemented) for CARD payments here too -- both this
+// module's registerPaymentForUser and sale-service.ts's createSaleForUser
+// must always agree on the exact same fixed account.
+import { getCardPaymentBankAccountForSaleForm } from "@/server/services/sale-service";
 
 // All Payment/Installment permission logic, calculations, and state
 // transitions live here, not in pages/components/actions or in the
@@ -42,18 +46,21 @@ import {
 //
 // Payment.bankAccountId records which specific account the customer's
 // transfer/deposit landed in for *this* payment, chosen by whoever
-// registers it via the manual "Registrar pago" flow (registerPaymentForUser)
-// -- required there, never trusted/derived automatically. Registering a
-// payment never touches any balance by itself, regardless of which account
-// was picked: the moment a payment is APPROVED here (see
-// approvePaymentForUser), a BankTransaction is created for exactly the
-// approved payment's amount and BankAccount.balance is incremented by that
-// same amount, atomically in the same transaction, against
-// Payment.bankAccountId when it's set. Older payments with no
-// bankAccountId of their own (created before this field was required, or
-// through sale-service.ts's separate initial-payment-at-sale-creation
-// path, which still doesn't collect one) fall back to Sale.bankAccountId
-// (the account selected when the sale was created) -- and if neither is
+// registers it -- via the manual "Registrar pago" flow
+// (registerPaymentForUser, required there for every method) or via the
+// per-cuota forma-de-pago flow at sale creation
+// (sale-service.ts#createSaleForUser, required there for BANK_TRANSFER/
+// DEPOSIT/CARD rows -- CASH never collects one; CARD is always the one
+// fixed account configured for card payments, never a seller choice there).
+// Never trusted/derived automatically. Registering a payment never touches
+// any balance by itself, regardless of which account was picked: the moment
+// a payment is APPROVED here (see approvePaymentForUser), a BankTransaction
+// is created for exactly the approved payment's amount and
+// BankAccount.balance is incremented by that same amount, atomically in the
+// same transaction, against Payment.bankAccountId when it's set. A CASH/
+// CARD payment, or one created before this field existed, has no
+// bankAccountId of its own and falls back to Sale.bankAccountId (a legacy
+// sale-wide account, no longer collected on new sales) -- and if neither is
 // set, approval still succeeds, it just never touches any balance.
 
 const PAYMENT_METHOD_VALUES = Object.values(PaymentMethod) as string[];
@@ -628,17 +635,36 @@ export async function registerPaymentForUser(
     errors.method = "Selecciona un método de pago válido.";
   }
 
-  // --- Bank account: the account where the customer's transfer/deposit
-  // actually landed, for this specific payment. Mandatory and re-checked
-  // against the database (must exist and be active), mirroring
-  // sale-service.ts's own bankAccountId validation -- never trusted from
-  // the client beyond the id it submits. Saved on the Payment but never
-  // used to touch any balance here; the balance only moves once this
-  // payment is approved (see approvePaymentForUser below).
+  // --- Bank account: the account where the customer's payment actually
+  // landed, for this specific payment. Mandatory for every method and
+  // re-checked against the database -- never trusted from the client beyond
+  // the id it submits. Saved on the Payment but never used to touch any
+  // balance here; the balance only moves once this payment is approved (see
+  // approvePaymentForUser below).
+  //
+  // CARD is a special case: every card terminal settles into the one fixed
+  // account configured via CARD_PAYMENT_BANK_ACCOUNT_ID
+  // (getCardPaymentBankAccountForSaleForm, reused from sale-service.ts
+  // rather than re-implemented here) -- the seller never chooses it, so
+  // whatever the form submits is only ever accepted if it matches that
+  // exact account, never merely "any active account". This mirrors the
+  // same rule createSaleForUser enforces for a CARD row at sale creation.
+  // BANK_TRANSFER/DEPOSIT/CASH/OTHER keep the original "any active account"
+  // rule, unchanged.
   const bankAccountIdRaw = str(raw.bankAccountId);
   let bankAccount: Awaited<ReturnType<typeof bankAccountRepository.findActiveBankAccountById>> =
     null;
-  if (!bankAccountIdRaw || !isValidUuid(bankAccountIdRaw)) {
+  if (methodRaw === PaymentMethod.CARD) {
+    const fixedCardBankAccount = await getCardPaymentBankAccountForSaleForm();
+    if (!fixedCardBankAccount) {
+      errors.bankAccountId =
+        "No hay una cuenta bancaria configurada para pagos con tarjeta. Contacta a un administrador.";
+    } else if (bankAccountIdRaw !== fixedCardBankAccount.id) {
+      errors.bankAccountId = "La cuenta bancaria de tarjeta no es válida.";
+    } else {
+      bankAccount = fixedCardBankAccount;
+    }
+  } else if (!bankAccountIdRaw || !isValidUuid(bankAccountIdRaw)) {
     errors.bankAccountId = "Selecciona una cuenta bancaria válida.";
   } else {
     bankAccount = await bankAccountRepository.findActiveBankAccountById(bankAccountIdRaw);

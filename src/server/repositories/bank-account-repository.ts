@@ -72,11 +72,18 @@ export async function listActiveBankAccounts() {
   });
 }
 
-/** Looks up a bank account, but only returns it if it's currently active -- mirrors sale-repository.findActiveProductById. */
+/**
+ * Looks up a bank account, but only returns it if it's currently active --
+ * mirrors sale-repository.findActiveProductById. `accountNumber` is
+ * included (not just id/bankName/alias) so callers that display this
+ * account to a user (e.g. sale-service.ts's fixed CARD-payment account)
+ * can mask it the same way the account selector does, without a second
+ * query.
+ */
 export async function findActiveBankAccountById(id: string, db: Db = prisma) {
   return db.bankAccount.findFirst({
     where: { id, active: true },
-    select: { id: true, bankName: true, alias: true },
+    select: { id: true, bankName: true, alias: true, accountNumber: true },
   });
 }
 

@@ -6,6 +6,7 @@ import {
   listProductsForSaleForm,
   listSellersForSaleForm,
   listBankAccountsForSaleForm,
+  getCardPaymentBankAccountForSaleForm,
 } from "@/server/services/sale-service";
 import { SaleForm } from "@/components/sales/sale-form";
 import {
@@ -33,10 +34,11 @@ export default async function NuevaVentaPage() {
     redirect("/acceso-denegado");
   }
 
-  const [products, sellers, bankAccounts] = await Promise.all([
+  const [products, sellers, bankAccounts, cardBankAccount] = await Promise.all([
     listProductsForSaleForm(),
     user.role === UserRole.ADMIN ? listSellersForSaleForm() : Promise.resolve([]),
     listBankAccountsForSaleForm(),
+    getCardPaymentBankAccountForSaleForm(),
   ]);
 
   return (
@@ -65,6 +67,16 @@ export default async function NuevaVentaPage() {
           accountHolder: account.accountHolder,
           accountNumber: account.accountNumber,
         }))}
+        cardBankAccount={
+          cardBankAccount
+            ? {
+                id: cardBankAccount.id,
+                bankName: cardBankAccount.bankName,
+                alias: cardBankAccount.alias,
+                accountNumber: cardBankAccount.accountNumber,
+              }
+            : null
+        }
         defaultSaleDate={todayDateOnly()}
         searchCustomersAction={searchCustomersForSaleAction}
         createCustomerAction={createCustomerForSaleAction}

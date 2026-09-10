@@ -6,6 +6,7 @@ import {
   listBankAccountsForPaymentForm,
   findRejectedPaymentNeedingCorrection,
 } from "@/server/services/payment-service";
+import { getCardPaymentBankAccountForSaleForm } from "@/server/services/sale-service";
 import { requireModuleAccess } from "@/lib/auth/guards";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { InstallmentStatus } from "@/generated/prisma/enums";
@@ -54,7 +55,10 @@ export default async function CuotaDetallePage({
 
   const boundAction = registerPaymentAction.bind(null, installment.id);
   const today = new Date().toISOString().slice(0, 10);
-  const bankAccounts = await listBankAccountsForPaymentForm();
+  const [bankAccounts, cardBankAccount] = await Promise.all([
+    listBankAccountsForPaymentForm(),
+    getCardPaymentBankAccountForSaleForm(),
+  ]);
 
   // Same "still-open rejection" rule as the seller dashboard alert (see
   // payment-service.ts#findRejectedPaymentNeedingCorrection) -- null once a
@@ -151,6 +155,7 @@ export default async function CuotaDetallePage({
             balanceCents={installment.balanceCents}
             defaultPaymentDate={today}
             bankAccounts={bankAccounts}
+            cardBankAccount={cardBankAccount}
           />
         ) : (
           <p className="rounded-lg border border-border bg-black/[0.02] px-4 py-3 text-sm text-muted-foreground">

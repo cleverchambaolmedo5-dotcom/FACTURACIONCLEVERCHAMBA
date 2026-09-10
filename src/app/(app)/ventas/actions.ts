@@ -17,16 +17,28 @@ export type SaleFormState = SaleActionResult | undefined;
 // invoked directly regardless of which page rendered the form.
 
 // Cuota payment fields are submitted under an indexed name (e.g.
-// "installmentPaymentMethod-0") rather than a single repeated field name,
-// since each cuota's extra fields (amount/voucher/entregado a) only render
-// in the DOM when that cuota actually has a forma de pago selected -- a
-// shared name read via formData.getAll() would silently misalign once any
-// earlier cuota's fields are absent. ALLOWED_INSTALLMENT_COUNTS tops out at
-// 3, so indices 0-2 always cover every possible cuota.
+// "installmentPaymentMethod-0-0") rather than a single repeated field name,
+// since each payment row's extra fields (amount/voucher/entregado a) only
+// render in the DOM when that row actually has a forma de pago selected --
+// a shared name read via formData.getAll() would silently misalign once any
+// earlier row's fields are absent. ALLOWED_INSTALLMENT_COUNTS tops out at 3,
+// so indices 0-2 always cover every possible cuota.
 const MAX_INSTALLMENTS = 3;
 
-function getIndexed(formData: FormData, prefix: string): FormDataEntryValue[] {
-  return Array.from({ length: MAX_INSTALLMENTS }, (_, index) => formData.get(`${prefix}-${index}`) ?? "");
+// A cuota can have several Payments (e.g. part cash, part transfer) -- this
+// bounds how many payment-row indices are read per installment. Must match
+// sale-form.tsx's own MAX_PAYMENTS_PER_INSTALLMENT and
+// sale-service.ts's constant of the same name.
+const MAX_PAYMENTS_PER_INSTALLMENT = 5;
+
+/** Reads one indexed field per installment/payment-row combination: `${prefix}-<installment>-<paymentRow>`, for the per-cuota payment fields (a cuota can have several Payments). */
+function getIndexed2D(formData: FormData, prefix: string): FormDataEntryValue[][] {
+  return Array.from({ length: MAX_INSTALLMENTS }, (_, installmentIndex) =>
+    Array.from(
+      { length: MAX_PAYMENTS_PER_INSTALLMENT },
+      (_, row) => formData.get(`${prefix}-${installmentIndex}-${row}`) ?? "",
+    ),
+  );
 }
 
 export async function createSaleAction(
@@ -42,15 +54,15 @@ export async function createSaleAction(
     discount: formData.get("discount"),
     installments: formData.get("installments"),
     installmentDueDates: formData.getAll("installmentDueDates"),
-    installmentAmounts: formData.getAll("installmentAmounts"),
+    firstInstallmentAmount: formData.get("firstInstallmentAmount"),
     sellerId: formData.get("sellerId"),
-    bankAccountId: formData.get("bankAccountId"),
     receipt: formData.get("receipt"),
-    installmentPaymentMethods: getIndexed(formData, "installmentPaymentMethod"),
-    installmentPaymentAmounts: getIndexed(formData, "installmentPaymentAmount"),
-    installmentPaymentReceivedByNames: getIndexed(formData, "installmentPaymentReceivedByName"),
-    installmentPaymentNotes: getIndexed(formData, "installmentPaymentNotes"),
-    installmentPaymentReceipts: getIndexed(formData, "installmentPaymentReceipt"),
+    installmentPaymentMethods: getIndexed2D(formData, "installmentPaymentMethod"),
+    installmentPaymentAmounts: getIndexed2D(formData, "installmentPaymentAmount"),
+    installmentPaymentReceivedByNames: getIndexed2D(formData, "installmentPaymentReceivedByName"),
+    installmentPaymentNotes: getIndexed2D(formData, "installmentPaymentNotes"),
+    installmentPaymentReceipts: getIndexed2D(formData, "installmentPaymentReceipt"),
+    installmentPaymentBankAccountIds: getIndexed2D(formData, "installmentPaymentBankAccountId"),
   });
 
   if (!result.ok) {

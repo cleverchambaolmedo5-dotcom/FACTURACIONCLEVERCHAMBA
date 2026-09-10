@@ -47,15 +47,26 @@ export function PaymentForm({
   balanceCents,
   defaultPaymentDate,
   bankAccounts,
+  cardBankAccount,
 }: {
   action: PaymentFormAction;
   balanceCents: number;
   defaultPaymentDate: string;
   bankAccounts: PaymentFormBankAccount[];
+  // The one fixed BankAccount every CARD payment is credited to -- null
+  // when CARD_PAYMENT_BANK_ACCOUNT_ID isn't configured, in which case the
+  // seller can still pick "Tarjeta" but submission is blocked (server-side,
+  // see registerPaymentForUser) until an admin configures it. Mirrors
+  // sale-form.tsx's own cardBankAccount prop.
+  cardBankAccount: PaymentFormBankAccount | null;
 }) {
   const [state, formAction, pending] = useActionState<PaymentFormState, FormData>(action, undefined);
   const errors = state && !state.ok ? state.errors : undefined;
   const formError = state && !state.ok ? state.formError : undefined;
+
+  // Only tracked so the "cuenta bancaria" field below can switch to the
+  // locked CARD view -- every other field stays uncontrolled, unchanged.
+  const [method, setMethod] = useState<PaymentMethod | "">("");
 
   const receiptInputRef = useRef<HTMLInputElement>(null);
   const [receiptClientError, setReceiptClientError] = useState<string | null>(null);
@@ -126,7 +137,8 @@ export function PaymentForm({
           <select
             id="method"
             name="method"
-            defaultValue=""
+            value={method}
+            onChange={(event) => setMethod(event.target.value as PaymentMethod)}
             disabled={pending}
             className={fieldClass(!!errors?.method)}
           >
@@ -147,26 +159,51 @@ export function PaymentForm({
         <label htmlFor="bankAccountId" className="text-sm font-medium text-foreground">
           Cuenta bancaria donde se recibió el pago
         </label>
-        <select
-          id="bankAccountId"
-          name="bankAccountId"
-          defaultValue=""
-          disabled={pending}
-          className={fieldClass(!!errors?.bankAccountId)}
-        >
-          <option value="" disabled>
-            Selecciona una cuenta bancaria…
-          </option>
-          {bankAccounts.map((account) => (
-            <option key={account.id} value={account.id}>
-              {account.bankName} — {account.alias} ({maskAccountNumber(account.accountNumber)})
-            </option>
-          ))}
-        </select>
-        <p className="text-xs text-muted-foreground">
-          Cuenta donde el cliente realizó la transferencia o el depósito. El saldo de esta cuenta
-          solo se actualiza cuando Contabilidad aprueba el pago.
-        </p>
+        {method === PaymentMethod.CARD ? (
+          cardBankAccount ? (
+            <>
+              <input type="hidden" name="bankAccountId" value={cardBankAccount.id} />
+              <p
+                id="bankAccountId"
+                className="rounded-md border border-border bg-black/[0.02] px-3 py-2 text-sm text-foreground"
+              >
+                {cardBankAccount.bankName} — {cardBankAccount.alias} (
+                {maskAccountNumber(cardBankAccount.accountNumber)})
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Los pagos con tarjeta siempre se acreditan a esta cuenta.
+              </p>
+            </>
+          ) : (
+            <p id="bankAccountId" className={fieldClass(true)}>
+              No hay una cuenta bancaria configurada para pagos con tarjeta. Contacta a un
+              administrador.
+            </p>
+          )
+        ) : (
+          <>
+            <select
+              id="bankAccountId"
+              name="bankAccountId"
+              defaultValue=""
+              disabled={pending}
+              className={fieldClass(!!errors?.bankAccountId)}
+            >
+              <option value="" disabled>
+                Selecciona una cuenta bancaria…
+              </option>
+              {bankAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.bankName} — {account.alias} ({maskAccountNumber(account.accountNumber)})
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Cuenta donde el cliente realizó la transferencia o el depósito. El saldo de esta
+              cuenta solo se actualiza cuando Contabilidad aprueba el pago.
+            </p>
+          </>
+        )}
         {errors?.bankAccountId && <p className="text-sm text-error">{errors.bankAccountId}</p>}
       </div>
 

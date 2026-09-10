@@ -121,12 +121,13 @@ export type CreatePaymentData = {
   // The bank account the customer paid into, as selected by whoever
   // registered this payment. payment-service.ts#registerPaymentForUser (the
   // manual "Registrar pago" flow) always passes one -- it's required there.
-  // Optional here only because sale-repository.ts#createSaleWithInstallments
-  // also calls this function, for its separate initial-payment-at-sale-
-  // creation flow, which doesn't collect a bank account and is left
-  // untouched -- those payments simply keep a null bankAccountId, and
-  // approvePaymentForUser falls back to the sale's own bankAccountId for
-  // them.
+  // sale-repository.ts#createSaleWithInstallments (the per-cuota forma-de-
+  // pago flow at sale creation) passes one too, for BANK_TRANSFER/DEPOSIT/
+  // CARD rows (CARD always the one fixed account, see
+  // sale-service.ts#getCardPaymentBankAccountForSaleForm) -- only CASH
+  // payments never collect an account, and simply keep a null
+  // bankAccountId, in which case approvePaymentForUser falls back to the
+  // sale's own (legacy) bankAccountId, if any.
   bankAccountId?: string;
   amount: string;
   paymentDate: Date;

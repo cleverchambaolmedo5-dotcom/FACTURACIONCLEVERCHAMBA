@@ -18,16 +18,34 @@ const METHOD_LABELS: Record<PaymentMethod, string> = {
   OTHER: "Otro",
 };
 
-// The only forma-de-pago options selectable per cuota (see the "Forma de
-// pago" selector inside each cuota block below) -- OTHER stays a valid
+// The only forma-de-pago options selectable per cuota (plus "Mixto", a
+// client-only combination of two or more of these) -- OTHER stays a valid
 // PaymentMethod value elsewhere (e.g. a manually-registered payment via
 // payment-form.tsx) but is intentionally not offered here.
-const CUOTA_PAYMENT_METHODS = [
+const PAYMENT_METHODS = [
   PaymentMethod.CASH,
   PaymentMethod.BANK_TRANSFER,
   PaymentMethod.DEPOSIT,
   PaymentMethod.CARD,
 ] as const;
+
+// Client-only sentinel for the "Mixto" forma de pago -- never submitted as
+// a PaymentMethod itself. When selected, each checked method in
+// CuotaPaymentState.mixedMethods becomes its own Payment row underneath,
+// using the exact same indexed fields (installmentPaymentMethod-<i>-<row>,
+// etc.) the server already reads for "several payments per cuota" -- see
+// sale-service.ts#createSaleForUser. Mixto is purely a friendlier way to
+// fill those same rows, not a new server concept.
+const MIXED = "MIXED" as const;
+
+// A cuota can have at most one row per base method (Efectivo, Transferencia,
+// Depósito, Tarjeta) -- well within the MAX_PAYMENTS_PER_INSTALLMENT (5)
+// that sale-service.ts and ventas/actions.ts both bound their indexed
+// field-reading to, so every Mixto combination always fits.
+
+// Business rule: no more than 3 cuotas per sale (matches
+// sale-service.ts's ALLOWED_INSTALLMENT_COUNTS).
+const MAX_INSTALLMENTS = 3;
 
 export type SaleFormAction = (
   state: SaleFormState,
@@ -44,7 +62,6 @@ export type SaleFormBankAccount = {
   accountNumber: string;
 };
 
-const INSTALLMENT_OPTIONS = [1, 2, 3] as const;
 // Only ever used to pre-fill the due date inputs with a reasonable
 // starting point -- every date remains fully editable, and the server
 // validates whatever is actually submitted rather than recomputing these.
@@ -70,10 +87,12 @@ function centsToAmountInput(cents: number): string {
 
 /**
  * Splits `totalCents` into `count` shares that sum exactly back to
- * `totalCents` -- used only to suggest a starting amount for each cuota
- * input (the first `count - 1` get the floor share, the last absorbs the
- * rounding remainder). Every cuota amount remains fully editable, and the
- * server re-validates whatever is actually submitted.
+ * `totalCents` -- the first `count - 1` get the floor share, the last
+ * absorbs the rounding remainder. Used both for the very first cuota-1
+ * suggestion and to preview cuotas 2/3 (a plain remaining-balance split) --
+ * the server (sale-service.ts's distributeCentsEvenly) recomputes the exact
+ * same thing from the submitted amount, so this is purely a live preview,
+ * never trusted on its own.
  */
 function distributeCentsPreview(totalCents: number, count: number): number[] {
   const base = Math.floor(totalCents / count);
@@ -101,6 +120,60 @@ function addDaysToDateInput(base: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+function resizeArray<T>(previous: T[], count: number, fill: () => T): T[] {
+  const next = previous.slice(0, count);
+  while (next.length < count) next.push(fill());
+  return next;
+}
+
+/** Returns a shallow copy of `record` with `key` removed -- used when unchecking a Mixto method to drop its draft/error entry entirely. */
+function omitKey<T>(record: Partial<Record<PaymentMethod, T>>, key: PaymentMethod): Partial<Record<PaymentMethod, T>> {
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
+// CUOTA = the agreed amount the customer owes for that installment.
+// PAGO = money the customer has actually handed over against one cuota.
+// A cuota's forma de pago is either a single method, or "Mixto" -- an
+// explicit combination of two or more methods the seller checks off, each
+// becoming its own Payment row (MethodDraft) underneath. `drafts` only ever
+// holds entries for methods that are actually active (the selected single
+// method, or the currently-checked mixedMethods) so switching forma de pago
+// never leaves stale data from a previously-selected method behind.
+type MethodDraft = { amount: string; receivedByName: string; notes: string; bankAccountId: string };
+type MethodFieldErrors = { receivedByName: string | null; receipt: string | null; bankAccountId: string | null };
+
+/** Every forma-de-pago except CASH lands in a specific bank account -- BANK_TRANSFER/DEPOSIT let the seller pick one, CARD always uses the fixed account below (see isFixedBankAccountMethod). */
+function methodRequiresBankAccount(method: PaymentMethod): boolean {
+  return (
+    method === PaymentMethod.BANK_TRANSFER ||
+    method === PaymentMethod.DEPOSIT ||
+    method === PaymentMethod.CARD
+  );
+}
+
+/** CARD's destination account is never a seller choice -- it's always the one fixed account configured for card payments (see cardBankAccount below), rendered read-only instead of the BANK_TRANSFER/DEPOSIT selector. */
+function isFixedBankAccountMethod(method: PaymentMethod): boolean {
+  return method === PaymentMethod.CARD;
+}
+type CuotaPaymentState = {
+  mode: "" | PaymentMethod | typeof MIXED;
+  // Only meaningful while mode === MIXED. Kept in PAYMENT_METHODS order so
+  // the blocks below the checkboxes render in a stable, predictable order.
+  mixedMethods: PaymentMethod[];
+  drafts: Partial<Record<PaymentMethod, MethodDraft>>;
+  errors: Partial<Record<PaymentMethod, MethodFieldErrors>>;
+};
+
+function emptyCuotaPaymentState(): CuotaPaymentState {
+  return { mode: "", mixedMethods: [], drafts: {}, errors: {} };
+}
+
+function emptyMethodDraft(): MethodDraft {
+  return { amount: "", receivedByName: "", notes: "", bankAccountId: "" };
+}
+
 export function SaleForm({
   action,
   role,
@@ -108,6 +181,7 @@ export function SaleForm({
   products,
   sellers,
   bankAccounts,
+  cardBankAccount,
   defaultSaleDate,
   searchCustomersAction,
   createCustomerAction,
@@ -118,6 +192,11 @@ export function SaleForm({
   products: SaleFormProduct[];
   sellers: SaleFormSeller[];
   bankAccounts: SaleFormBankAccount[];
+  // The one fixed BankAccount every CARD payment is credited to -- null
+  // when CARD_PAYMENT_BANK_ACCOUNT_ID isn't configured, in which case a
+  // seller can still pick "Tarjeta" but submission is blocked until an
+  // admin configures it (see the CARD block in renderMethodBlock below).
+  cardBankAccount: Pick<SaleFormBankAccount, "id" | "bankName" | "alias" | "accountNumber"> | null;
   defaultSaleDate: string;
   searchCustomersAction: (query: string) => Promise<CustomerSearchResult[]>;
   createCustomerAction: NewCustomerAction;
@@ -127,156 +206,49 @@ export function SaleForm({
   const formError = state && !state.ok ? state.formError : undefined;
   const canPickSeller = role !== UserRole.SELLER;
 
-  const receiptInputRef = useRef<HTMLInputElement>(null);
-  const [receiptClientError, setReceiptClientError] = useState<string | null>(null);
-  const receiptError = errors?.receipt ?? receiptClientError ?? undefined;
-  const [installmentsTotalClientError, setInstallmentsTotalClientError] = useState<string | null>(
-    null,
-  );
-
-  // --- Per-cuota "forma de pago" (optional, independent per installment):
-  // each cuota may optionally record how it was already paid at the moment
-  // the sale is registered, with its own method and fields -- see
-  // sale-service.ts#createSaleForUser's per-cuota payment block. Arrays are
-  // aligned by cuota index, mirroring installmentAmounts/dueDates above. An
-  // empty method (the default) means "no payment yet" for that cuota, same
-  // as today.
-  const [installmentPaymentMethods, setInstallmentPaymentMethods] = useState<string[]>([""]);
-  const [installmentPaymentAmounts, setInstallmentPaymentAmounts] = useState<string[]>(["0.00"]);
-  const [installmentPaymentReceivedByNames, setInstallmentPaymentReceivedByNames] = useState<
-    string[]
-  >([""]);
-  const [installmentPaymentNotesValues, setInstallmentPaymentNotesValues] = useState<string[]>([
-    "",
-  ]);
-  const installmentPaymentReceiptRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const [installmentPaymentReceiptClientErrors, setInstallmentPaymentReceiptClientErrors] =
-    useState<(string | null)[]>([null]);
-  const [
-    installmentPaymentReceivedByNameClientErrors,
-    setInstallmentPaymentReceivedByNameClientErrors,
-  ] = useState<(string | null)[]>([null]);
-
-  /** Selecting a method for a cuota defaults its "Monto pagado" to that cuota's own amount, the same convenience the old single "ya pagó" checkbox offered. */
-  function handleInstallmentPaymentMethodChange(index: number, value: string) {
-    setInstallmentPaymentMethods((previous) => previous.map((m, i) => (i === index ? value : m)));
-    setInstallmentPaymentAmounts((previous) =>
-      previous.map((amount, i) =>
-        i === index && value && (!amount || amount === "0.00")
-          ? installmentAmounts[index] ?? "0.00"
-          : amount,
-      ),
-    );
-    setInstallmentPaymentReceiptClientErrors((previous) =>
-      previous.map((e, i) => (i === index ? null : e)),
-    );
-    setInstallmentPaymentReceivedByNameClientErrors((previous) =>
-      previous.map((e, i) => (i === index ? null : e)),
-    );
-  }
-
-  function handleInstallmentPaymentAmountChange(index: number, value: string) {
-    setInstallmentPaymentAmounts((previous) => previous.map((a, i) => (i === index ? value : a)));
-  }
-
-  function handleInstallmentPaymentReceivedByNameChange(index: number, value: string) {
-    setInstallmentPaymentReceivedByNames((previous) =>
-      previous.map((a, i) => (i === index ? value : a)),
-    );
-  }
-
-  function handleInstallmentPaymentNotesChange(index: number, value: string) {
-    setInstallmentPaymentNotesValues((previous) =>
-      previous.map((a, i) => (i === index ? value : a)),
-    );
-  }
-
-  // Belt-and-suspenders: the actual, unbypassable rule lives in
-  // createSaleForUser (server-side) -- this only blocks the obvious cases
-  // (no file chosen, cuotas that don't add up to the final price, a cuota
-  // payment missing its "Entregado a"/voucher) without a round trip.
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    const hasFile = !!receiptInputRef.current?.files?.length;
-    if (!hasFile) {
-      event.preventDefault();
-      setReceiptClientError("Debes adjuntar un comprobante para registrar la venta.");
-      return;
-    }
-    setReceiptClientError(null);
-
-    const nextReceiptErrors = installmentPaymentReceiptClientErrors.slice();
-    const nextReceivedByNameErrors = installmentPaymentReceivedByNameClientErrors.slice();
-    let hasCuotaPaymentError = false;
-
-    for (let index = 0; index < installmentsCount; index += 1) {
-      const method = installmentPaymentMethods[index];
-      if (!method) {
-        nextReceiptErrors[index] = null;
-        nextReceivedByNameErrors[index] = null;
-        continue;
-      }
-      if (method === PaymentMethod.CASH) {
-        nextReceiptErrors[index] = null;
-        if (!installmentPaymentReceivedByNames[index]?.trim()) {
-          nextReceivedByNameErrors[index] = "Indica quién recibió el pago.";
-          hasCuotaPaymentError = true;
-        } else {
-          nextReceivedByNameErrors[index] = null;
-        }
-      } else {
-        nextReceivedByNameErrors[index] = null;
-        const hasVoucher = !!installmentPaymentReceiptRefs.current[index]?.files?.length;
-        if (!hasVoucher) {
-          nextReceiptErrors[index] = "Debes adjuntar el voucher del pago.";
-          hasCuotaPaymentError = true;
-        } else {
-          nextReceiptErrors[index] = null;
-        }
-      }
-    }
-    setInstallmentPaymentReceiptClientErrors(nextReceiptErrors);
-    setInstallmentPaymentReceivedByNameClientErrors(nextReceivedByNameErrors);
-    if (hasCuotaPaymentError) {
-      event.preventDefault();
-      return;
-    }
-
-    const installmentsTotalMessage = installmentsExceedFinalPrice
-      ? "La suma de las cuotas no puede superar el precio final de la venta."
-      : installmentsHaveZeroAmount
-        ? "Cada cuota debe ser mayor a cero."
-        : installmentsMismatchFinalPrice
-          ? "La suma de las cuotas debe ser igual al precio final de la venta."
-          : null;
-    if (installmentsTotalMessage) {
-      event.preventDefault();
-      setInstallmentsTotalClientError(installmentsTotalMessage);
-      return;
-    }
-    setInstallmentsTotalClientError(null);
-  }
-
   // Client-side state only drives the live preview below -- the actual
-  // originalPrice/finalPrice/dueDate values are always recomputed and
-  // validated on the server from the submitted fields, never trusted
-  // from here.
+  // originalPrice/finalPrice/dueDate/installment-amount values are always
+  // recomputed and validated on the server from the submitted fields, never
+  // trusted from here.
   const [productId, setProductId] = useState("");
-  const [bankAccountId, setBankAccountId] = useState("");
   const [discount, setDiscount] = useState("0");
   const [saleDate, setSaleDate] = useState(defaultSaleDate);
+
+  // --- Cuotas: start with only Cuota 1. The seller adds more one at a time
+  // via "+ Agregar otra cuota", up to MAX_INSTALLMENTS -- cuotas are never
+  // created automatically just because a balance would be left pending.
   const [installmentsCount, setInstallmentsCount] = useState<number>(1);
   const [dueDates, setDueDates] = useState<string[]>([defaultSaleDate]);
   // Tracks which due-date inputs the user has hand-edited, so changing
   // the sale date only refreshes still-default (untouched) cuotas.
   const [touched, setTouched] = useState<boolean[]>([false]);
-  // The cuota amounts are now user-editable (see handleInstallmentAmountChange
-  // below), not purely derived. `amountsTouched` mirrors the due-date
-  // `touched` pattern: an untouched cuota keeps tracking the even-split
-  // suggestion as the product/discount/count change, while a hand-edited
-  // one is left alone until the user clears the form.
-  const [installmentAmounts, setInstallmentAmounts] = useState<string[]>(["0.00"]);
-  const [amountsTouched, setAmountsTouched] = useState<boolean[]>([false]);
 
+  // --- Cuota amounts: only cuota 1's amount is ever entered by the seller
+  // -- cuotas 2/3 are always the remaining balance split evenly (see
+  // installmentAmountCentsPreview below), matching sale-service.ts's own
+  // server-side computation exactly. `firstInstallmentTouched` mirrors the
+  // old per-cuota "touched" pattern: while untouched, the field keeps
+  // tracking an even-split suggestion as the product/discount/installments
+  // change; once hand-edited it's left alone.
+  const [firstInstallmentAmount, setFirstInstallmentAmount] = useState("0.00");
+  const [firstInstallmentTouched, setFirstInstallmentTouched] = useState(false);
+  const [firstInstallmentClientError, setFirstInstallmentClientError] = useState<string | null>(
+    null,
+  );
+
+  // --- Forma de pago per cuota (CUOTA vs. PAGO vs. FORMA DE PAGO): each
+  // cuota independently holds either nothing yet, one method, or a Mixto
+  // combination -- see the "Forma de pago" section rendered per cuota
+  // below. `mode === ""` means "no payment registered yet for this cuota",
+  // the common case for a newly-added installment.
+  const [cuotaPayments, setCuotaPayments] = useState<CuotaPaymentState[]>([emptyCuotaPaymentState()]);
+  const paymentReceiptRefs = useRef<(HTMLInputElement | null)[][]>([[]]);
+
+  // --- Pricing, derived from the selected product/discount -- declared
+  // before any handler that closes over them (handleSubmit,
+  // handleModeChange, ...) so their value is unambiguous at every read
+  // site. The actual originalPrice/finalPrice are always recomputed and
+  // validated on the server; these only drive the live preview.
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === productId),
     [products, productId],
@@ -286,106 +258,263 @@ export function SaleForm({
   const finalPrice = Math.max(originalPrice - discountValue, 0);
   const finalPriceCents = Math.max(toCents(originalPrice) - toCents(discountValue), 0);
 
-  const installmentAmountCents = installmentAmounts
-    .slice(0, installmentsCount)
-    .map((amount) => Math.max(toCents(Number(amount) || 0), 0));
-  const totalInstallmentsCents = installmentAmountCents.reduce((sum, cents) => sum + cents, 0);
-  const remainingBalanceCents = Math.max(finalPriceCents - totalInstallmentsCents, 0);
-  const installmentsExceedFinalPrice = totalInstallmentsCents > finalPriceCents;
-  const installmentsMismatchFinalPrice = totalInstallmentsCents !== finalPriceCents;
-  const installmentsHaveZeroAmount = installmentAmountCents.some((cents) => cents <= 0);
-  const installmentsTotalError =
-    errors?.installmentsTotal ?? installmentsTotalClientError ?? undefined;
-
-  /**
-   * Recomputes every untouched cuota so that, together, they cover exactly
-   * what's left after subtracting the hand-edited (touched) cuotas from
-   * `newFinalPriceCents` -- e.g. with 2 cuotas and $300 typed into cuota 1,
-   * cuota 2 becomes `newFinalPriceCents - 300` automatically, updating live
-   * as cuota 1 changes. A touched cuota's own value is always left exactly
-   * as the user entered it. The remaining balance is floor-split across the
-   * untouched cuotas, with the rounding remainder absorbed by the last
-   * untouched one -- the same rule `distributeCentsPreview` already uses
-   * for the very first suggestion.
-   */
-  function computeUntouchedDistribution(
-    previousAmounts: string[],
-    previousTouched: boolean[],
-    newFinalPriceCents: number,
-    count: number,
-  ): string[] {
-    const untouchedIndices: number[] = [];
-    let touchedSumCents = 0;
-    for (let index = 0; index < count; index += 1) {
-      if (previousTouched[index]) {
-        touchedSumCents += Math.max(toCents(Number(previousAmounts[index]) || 0), 0);
-      } else {
-        untouchedIndices.push(index);
-      }
-    }
-
-    const result = Array.from({ length: count }, (_, index) => previousAmounts[index] ?? "0.00");
-    if (untouchedIndices.length === 0) return result;
-
-    const remainingCents = Math.max(newFinalPriceCents - touchedSumCents, 0);
-    const shares = distributeCentsPreview(remainingCents, untouchedIndices.length);
-    untouchedIndices.forEach((index, shareIndex) => {
-      result[index] = centsToAmountInput(shares[shareIndex]);
-    });
-    return result;
+  /** The methods with an active payment block for a given cuota, in stable PAYMENT_METHODS order -- also the row order used for the indexed form fields. */
+  function activeMethods(cuotaIndex: number): PaymentMethod[] {
+    const cuota = cuotaPayments[cuotaIndex];
+    if (!cuota || !cuota.mode) return [];
+    return cuota.mode === MIXED ? cuota.mixedMethods : [cuota.mode];
   }
 
-  function handleInstallmentsCountChange(count: number) {
-    setInstallmentsCount(count);
-    setDueDates((previous) => {
-      const next = previous.slice(0, count);
-      while (next.length < count) {
-        next.push(addDaysToDateInput(saleDate, INSTALLMENT_OFFSET_DAYS[next.length]));
-      }
-      return next;
-    });
-    setTouched((previous) => {
-      const next = previous.slice(0, count);
-      while (next.length < count) next.push(false);
-      return next;
-    });
-    const nextAmountsTouched = amountsTouched.slice(0, count);
-    while (nextAmountsTouched.length < count) nextAmountsTouched.push(false);
-    setInstallmentAmounts((previous) =>
-      computeUntouchedDistribution(previous, nextAmountsTouched, finalPriceCents, count),
-    );
-    setAmountsTouched(nextAmountsTouched);
+  function draftFor(cuotaIndex: number, method: PaymentMethod): MethodDraft {
+    return cuotaPayments[cuotaIndex]?.drafts[method] ?? emptyMethodDraft();
+  }
 
-    setInstallmentPaymentMethods((previous) => {
-      const next = previous.slice(0, count);
-      while (next.length < count) next.push("");
-      return next;
-    });
-    setInstallmentPaymentAmounts((previous) => {
-      const next = previous.slice(0, count);
-      while (next.length < count) next.push("0.00");
-      return next;
-    });
-    setInstallmentPaymentReceivedByNames((previous) => {
-      const next = previous.slice(0, count);
-      while (next.length < count) next.push("");
-      return next;
-    });
-    setInstallmentPaymentNotesValues((previous) => {
-      const next = previous.slice(0, count);
-      while (next.length < count) next.push("");
-      return next;
-    });
-    setInstallmentPaymentReceiptClientErrors((previous) => {
-      const next = previous.slice(0, count);
-      while (next.length < count) next.push(null);
-      return next;
-    });
-    setInstallmentPaymentReceivedByNameClientErrors((previous) => {
-      const next = previous.slice(0, count);
-      while (next.length < count) next.push(null);
-      return next;
-    });
+  /** CARD's draft always starts pre-filled with the fixed card account (never blank, since the seller never picks it); every other method starts with no account selected. */
+  function defaultBankAccountIdFor(method: PaymentMethod): string {
+    return isFixedBankAccountMethod(method) ? (cardBankAccount?.id ?? "") : "";
+  }
+
+  /** Default suggestion for cuota 1 while untouched: an even split across every cuota, mirroring the old all-cuotas-even-split starting point. */
+  function defaultFirstInstallmentAmount(newFinalPriceCents: number, count: number): string {
+    return centsToAmountInput(distributeCentsPreview(newFinalPriceCents, count)[0] ?? 0);
+  }
+
+  // --- Live preview of every cuota's amount: cuota 1 is whatever the
+  // seller typed, cuotas 2+ are the remaining balance split evenly (last
+  // one absorbing the rounding remainder) -- exactly mirrors
+  // sale-service.ts's distributeCentsEvenly. Purely for display; the server
+  // is the only source of truth.
+  const installmentAmountCentsPreview = useMemo(() => {
+    if (installmentsCount === 1) return [finalPriceCents];
+    const firstCents = Math.max(toCents(Number(firstInstallmentAmount) || 0), 0);
+    const remainderCents = Math.max(finalPriceCents - firstCents, 0);
+    const shares = distributeCentsPreview(remainderCents, installmentsCount - 1);
+    return [firstCents, ...shares];
+  }, [installmentsCount, finalPriceCents, firstInstallmentAmount]);
+
+  /** Sum of a cuota's currently-entered payment amounts across its active methods -- used only for the live "pagado/pendiente" preview. */
+  function paidCentsForInstallment(installmentIndex: number): number {
+    return activeMethods(installmentIndex).reduce(
+      (sum, method) => sum + Math.max(toCents(Number(draftFor(installmentIndex, method).amount) || 0), 0),
+      0,
+    );
+  }
+
+  const installmentPaymentsExceedCuota = Array.from({ length: installmentsCount }, (_, i) => {
+    const cuotaCents = installmentAmountCentsPreview[i] ?? 0;
+    return paidCentsForInstallment(i) > cuotaCents;
+  });
+
+  const totalPaidCents = Array.from({ length: installmentsCount }, (_, i) => paidCentsForInstallment(i)).reduce(
+    (sum, cents) => sum + cents,
+    0,
+  );
+  const saleBalanceCents = Math.max(finalPriceCents - totalPaidCents, 0);
+
+  const firstInstallmentError =
+    errors?.firstInstallmentAmount ?? firstInstallmentClientError ?? undefined;
+
+  function updateDraft(
+    cuotaIndex: number,
+    method: PaymentMethod,
+    patch: Partial<MethodDraft>,
+  ) {
+    setCuotaPayments((previous) =>
+      previous.map((cuota, i) =>
+        i === cuotaIndex
+          ? { ...cuota, drafts: { ...cuota.drafts, [method]: { ...draftFor(i, method), ...patch } } }
+          : cuota,
+      ),
+    );
+  }
+
+  function clearMethodError(cuotaIndex: number, method: PaymentMethod, patch: Partial<MethodFieldErrors>) {
+    setCuotaPayments((previous) =>
+      previous.map((cuota, i) =>
+        i === cuotaIndex
+          ? {
+              ...cuota,
+              errors: {
+                ...cuota.errors,
+                [method]: { ...(cuota.errors[method] ?? { receivedByName: null, receipt: null }), ...patch },
+              },
+            }
+          : cuota,
+      ),
+    );
+  }
+
+  /** Selecting a single forma de pago defaults its "Monto" to the full cuota amount, the same convenience the old per-payment selector offered. Choosing "Mixto" only switches the mode -- the seller then checks off which methods compose it. */
+  function handleModeChange(cuotaIndex: number, value: string) {
+    setCuotaPayments((previous) =>
+      previous.map((cuota, i) => {
+        if (i !== cuotaIndex) return cuota;
+        if (value === MIXED) {
+          return { mode: MIXED, mixedMethods: [], drafts: {}, errors: {} };
+        }
+        if (!value) {
+          return emptyCuotaPaymentState();
+        }
+        const method = value as PaymentMethod;
+        const cuotaCents = installmentAmountCentsPreview[cuotaIndex] ?? 0;
+        return {
+          mode: method,
+          mixedMethods: [],
+          drafts: {
+            [method]: {
+              ...emptyMethodDraft(),
+              amount: centsToAmountInput(Math.max(cuotaCents, 0)),
+              bankAccountId: defaultBankAccountIdFor(method),
+            },
+          },
+          errors: {},
+        };
+      }),
+    );
+    paymentReceiptRefs.current[cuotaIndex] = [];
+  }
+
+  /** Checking a method under "Mixto" adds its block, defaulting its amount to whatever is still pending against the other checked methods; unchecking removes the block and its data entirely. */
+  function toggleMixedMethod(cuotaIndex: number, method: PaymentMethod, checked: boolean) {
+    setCuotaPayments((previous) =>
+      previous.map((cuota, i) => {
+        if (i !== cuotaIndex) return cuota;
+        if (checked) {
+          const alreadyCents = cuota.mixedMethods.reduce(
+            (sum, m) => sum + Math.max(toCents(Number(cuota.drafts[m]?.amount) || 0), 0),
+            0,
+          );
+          const cuotaCents = installmentAmountCentsPreview[cuotaIndex] ?? 0;
+          const pendingCents = Math.max(cuotaCents - alreadyCents, 0);
+          const nextMixedMethods = PAYMENT_METHODS.filter(
+            (m) => m === method || cuota.mixedMethods.includes(m),
+          );
+          return {
+            ...cuota,
+            mixedMethods: nextMixedMethods,
+            drafts: {
+              ...cuota.drafts,
+              [method]: cuota.drafts[method] ?? {
+                ...emptyMethodDraft(),
+                amount: centsToAmountInput(pendingCents),
+                bankAccountId: defaultBankAccountIdFor(method),
+              },
+            },
+          };
+        }
+        return {
+          ...cuota,
+          mixedMethods: cuota.mixedMethods.filter((m) => m !== method),
+          drafts: omitKey(cuota.drafts, method),
+          errors: omitKey(cuota.errors, method),
+        };
+      }),
+    );
+  }
+
+  // Belt-and-suspenders: the actual, unbypassable rule lives in
+  // createSaleForUser (server-side) -- this only blocks the obvious cases
+  // (an invalid/missing cuota-1 amount, a payment missing its "Entregado
+  // a"/voucher, a cuota's payments exceeding its own amount) without a
+  // round trip. There is no sale-level receipt requirement in this flow --
+  // each payment's own record (below) is what backs the sale.
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    let hasBlockingError = false;
+
+    if (installmentsCount > 1) {
+      const firstCents = toCents(Number(firstInstallmentAmount) || 0);
+      const remainingCount = installmentsCount - 1;
+      const remainderCents = finalPriceCents - firstCents;
+      if (firstCents <= 0) {
+        setFirstInstallmentClientError("El monto de la primera cuota debe ser mayor a cero.");
+        hasBlockingError = true;
+      } else if (firstCents >= finalPriceCents) {
+        setFirstInstallmentClientError(
+          "El monto de la primera cuota debe ser menor al precio final de la venta.",
+        );
+        hasBlockingError = true;
+      } else if (remainderCents < remainingCount) {
+        setFirstInstallmentClientError(
+          "El monto de la primera cuota deja un saldo insuficiente para repartir entre las demás cuotas.",
+        );
+        hasBlockingError = true;
+      } else {
+        setFirstInstallmentClientError(null);
+      }
+    } else {
+      setFirstInstallmentClientError(null);
+    }
+
+    const nextCuotaPayments = cuotaPayments.map((cuota) => ({ ...cuota, errors: { ...cuota.errors } }));
+
+    for (let i = 0; i < installmentsCount; i += 1) {
+      const methods = activeMethods(i);
+      methods.forEach((method, row) => {
+        const draft = draftFor(i, method);
+        if (method === PaymentMethod.CASH) {
+          if (!draft.receivedByName.trim()) {
+            nextCuotaPayments[i].errors[method] = {
+              receivedByName: "Indica quién recibió el pago.",
+              receipt: null,
+              bankAccountId: null,
+            };
+            hasBlockingError = true;
+          } else {
+            nextCuotaPayments[i].errors[method] = { receivedByName: null, receipt: null, bankAccountId: null };
+          }
+        } else {
+          const hasVoucher = !!paymentReceiptRefs.current[i]?.[row]?.files?.length;
+          const bankAccountMissing = methodRequiresBankAccount(method) && !draft.bankAccountId;
+          if (!hasVoucher || bankAccountMissing) {
+            hasBlockingError = true;
+          }
+          nextCuotaPayments[i].errors[method] = {
+            receivedByName: null,
+            receipt: hasVoucher ? null : "Debes adjuntar el voucher del pago.",
+            bankAccountId: bankAccountMissing ? "Selecciona una cuenta bancaria de destino." : null,
+          };
+        }
+      });
+    }
+    setCuotaPayments(nextCuotaPayments);
+
+    if (installmentPaymentsExceedCuota.some(Boolean)) {
+      hasBlockingError = true;
+    }
+
+    if (hasBlockingError) {
+      event.preventDefault();
+    }
+  }
+
+  function handleAddCuota() {
+    if (installmentsCount >= MAX_INSTALLMENTS) return;
+    const count = installmentsCount + 1;
+    setInstallmentsCount(count);
+    setDueDates((previous) =>
+      resizeArray(previous, count, () => addDaysToDateInput(saleDate, INSTALLMENT_OFFSET_DAYS[previous.length])),
+    );
+    setTouched((previous) => resizeArray(previous, count, () => false));
+    setCuotaPayments((previous) => resizeArray(previous, count, () => emptyCuotaPaymentState()));
+    paymentReceiptRefs.current = resizeArray(paymentReceiptRefs.current, count, () => []);
+
+    if (!firstInstallmentTouched) {
+      setFirstInstallmentAmount(defaultFirstInstallmentAmount(finalPriceCents, count));
+    }
+  }
+
+  function handleRemoveCuota() {
+    if (installmentsCount <= 1) return;
+    const count = installmentsCount - 1;
+    setInstallmentsCount(count);
+    setDueDates((previous) => previous.slice(0, count));
+    setTouched((previous) => previous.slice(0, count));
+    setCuotaPayments((previous) => previous.slice(0, count));
+    paymentReceiptRefs.current = paymentReceiptRefs.current.slice(0, count);
+
+    if (!firstInstallmentTouched) {
+      setFirstInstallmentAmount(defaultFirstInstallmentAmount(finalPriceCents, count));
+    }
   }
 
   function handleSaleDateChange(value: string) {
@@ -406,27 +535,185 @@ export function SaleForm({
     setProductId(value);
     const newOriginalPrice = products.find((product) => product.id === value)?.officialPrice ?? 0;
     const newFinalPriceCents = Math.max(toCents(newOriginalPrice) - toCents(discountValue), 0);
-    setInstallmentAmounts((previous) =>
-      computeUntouchedDistribution(previous, amountsTouched, newFinalPriceCents, installmentsCount),
-    );
+    if (!firstInstallmentTouched) {
+      setFirstInstallmentAmount(defaultFirstInstallmentAmount(newFinalPriceCents, installmentsCount));
+    }
   }
 
   function handleDiscountChange(value: string) {
     setDiscount(value);
     const newDiscountValue = Number(value) || 0;
     const newFinalPriceCents = Math.max(toCents(originalPrice) - toCents(newDiscountValue), 0);
-    setInstallmentAmounts((previous) =>
-      computeUntouchedDistribution(previous, amountsTouched, newFinalPriceCents, installmentsCount),
-    );
+    if (!firstInstallmentTouched) {
+      setFirstInstallmentAmount(defaultFirstInstallmentAmount(newFinalPriceCents, installmentsCount));
+    }
   }
 
-  function handleInstallmentAmountChange(index: number, value: string) {
-    const nextTouched = amountsTouched.map((flag, i) => (i === index ? true : flag));
-    setInstallmentAmounts((previous) => {
-      const updated = previous.map((amount, i) => (i === index ? value : amount));
-      return computeUntouchedDistribution(updated, nextTouched, finalPriceCents, installmentsCount);
-    });
-    setAmountsTouched(nextTouched);
+  function handleFirstInstallmentAmountChange(value: string) {
+    setFirstInstallmentAmount(value);
+    setFirstInstallmentTouched(true);
+    setFirstInstallmentClientError(null);
+  }
+
+  /** Renders one method's Monto / Entregado a (or Voucher) / Observación block -- shared by the single-method case (no header) and each checked method under Mixto (with a header naming the method). */
+  function renderMethodBlock(cuotaIndex: number, method: PaymentMethod, row: number, showHeader: boolean) {
+    const draft = draftFor(cuotaIndex, method);
+    const fieldErrors = cuotaPayments[cuotaIndex]?.errors[method];
+    const receivedByNameError =
+      errors?.installmentPaymentReceivedByNames?.[cuotaIndex]?.[row] ?? fieldErrors?.receivedByName ?? undefined;
+    const receiptError =
+      errors?.installmentPaymentReceipts?.[cuotaIndex]?.[row] ?? fieldErrors?.receipt ?? undefined;
+    const amountError = errors?.installmentPaymentAmounts?.[cuotaIndex]?.[row];
+    const bankAccountError =
+      errors?.installmentPaymentBankAccountIds?.[cuotaIndex]?.[row] ?? fieldErrors?.bankAccountId ?? undefined;
+    const idPrefix = `installmentPayment-${cuotaIndex}-${method}`;
+
+    return (
+      <div key={method} className="space-y-3 rounded-md border border-border bg-black/[0.02] p-3">
+        <input type="hidden" name={`installmentPaymentMethod-${cuotaIndex}-${row}`} value={method} />
+        {showHeader && (
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {METHOD_LABELS[method]}
+          </p>
+        )}
+
+        <div className="space-y-1">
+          <label htmlFor={`${idPrefix}-amount`} className="text-sm font-medium text-foreground">
+            Monto
+          </label>
+          <div className="relative">
+            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground">
+              $
+            </span>
+            <input
+              id={`${idPrefix}-amount`}
+              name={`installmentPaymentAmount-${cuotaIndex}-${row}`}
+              type="number"
+              min="0.01"
+              step="0.01"
+              inputMode="decimal"
+              value={draft.amount}
+              onChange={(event) => updateDraft(cuotaIndex, method, { amount: event.target.value })}
+              disabled={pending}
+              className={`${fieldClass(!!amountError)} pl-6`}
+            />
+          </div>
+          {amountError && <p className="text-sm text-error">{amountError}</p>}
+        </div>
+
+        {methodRequiresBankAccount(method) && (
+          <div className="space-y-1">
+            <label htmlFor={`${idPrefix}-bankAccount`} className="text-sm font-medium text-foreground">
+              Cuenta bancaria de destino *
+            </label>
+            {isFixedBankAccountMethod(method) ? (
+              cardBankAccount ? (
+                <>
+                  <input
+                    type="hidden"
+                    name={`installmentPaymentBankAccountId-${cuotaIndex}-${row}`}
+                    value={cardBankAccount.id}
+                  />
+                  <p
+                    id={`${idPrefix}-bankAccount`}
+                    className="rounded-md border border-border bg-black/[0.02] px-3 py-2 text-sm text-foreground"
+                  >
+                    {cardBankAccount.bankName} — {cardBankAccount.alias} (
+                    {maskAccountNumber(cardBankAccount.accountNumber)})
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Los pagos con tarjeta siempre se acreditan a esta cuenta.
+                  </p>
+                </>
+              ) : (
+                <p id={`${idPrefix}-bankAccount`} className={fieldClass(true)}>
+                  No hay una cuenta bancaria configurada para pagos con tarjeta. Contacta a un
+                  administrador.
+                </p>
+              )
+            ) : (
+              <select
+                id={`${idPrefix}-bankAccount`}
+                name={`installmentPaymentBankAccountId-${cuotaIndex}-${row}`}
+                value={draft.bankAccountId}
+                onChange={(event) => {
+                  updateDraft(cuotaIndex, method, { bankAccountId: event.target.value });
+                  clearMethodError(cuotaIndex, method, { bankAccountId: null });
+                }}
+                disabled={pending}
+                className={fieldClass(!!bankAccountError)}
+              >
+                <option value="" disabled>
+                  Selecciona una cuenta bancaria…
+                </option>
+                {bankAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.bankName} — {account.alias} ({maskAccountNumber(account.accountNumber)})
+                  </option>
+                ))}
+              </select>
+            )}
+            {bankAccountError && <p className="text-sm text-error">{bankAccountError}</p>}
+          </div>
+        )}
+
+        {method === PaymentMethod.CASH ? (
+          <div className="space-y-1">
+            <label htmlFor={`${idPrefix}-receivedBy`} className="text-sm font-medium text-foreground">
+              Entregado a *
+            </label>
+            <input
+              id={`${idPrefix}-receivedBy`}
+              name={`installmentPaymentReceivedByName-${cuotaIndex}-${row}`}
+              value={draft.receivedByName}
+              onChange={(event) => {
+                updateDraft(cuotaIndex, method, { receivedByName: event.target.value });
+                clearMethodError(cuotaIndex, method, { receivedByName: null });
+              }}
+              disabled={pending}
+              className={fieldClass(!!receivedByNameError)}
+            />
+            {receivedByNameError && <p className="text-sm text-error">{receivedByNameError}</p>}
+          </div>
+        ) : (
+          <div className="space-y-1">
+            <label htmlFor={`${idPrefix}-receipt`} className="text-sm font-medium text-foreground">
+              Voucher *
+            </label>
+            <input
+              ref={(el) => {
+                if (!paymentReceiptRefs.current[cuotaIndex]) paymentReceiptRefs.current[cuotaIndex] = [];
+                paymentReceiptRefs.current[cuotaIndex][row] = el;
+              }}
+              id={`${idPrefix}-receipt`}
+              name={`installmentPaymentReceipt-${cuotaIndex}-${row}`}
+              type="file"
+              accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
+              disabled={pending}
+              onChange={() => clearMethodError(cuotaIndex, method, { receipt: null })}
+              className={fieldClass(!!receiptError)}
+            />
+            <p className="text-xs text-muted-foreground">PDF, JPG, PNG o WEBP. Máximo 5 MB.</p>
+            {receiptError && <p className="text-sm text-error">{receiptError}</p>}
+          </div>
+        )}
+
+        <div className="space-y-1">
+          <label htmlFor={`${idPrefix}-notes`} className="text-sm font-medium text-foreground">
+            Observación <span className="font-normal text-muted-foreground">(opcional)</span>
+          </label>
+          <textarea
+            id={`${idPrefix}-notes`}
+            name={`installmentPaymentNotes-${cuotaIndex}-${row}`}
+            rows={2}
+            value={draft.notes}
+            onChange={(event) => updateDraft(cuotaIndex, method, { notes: event.target.value })}
+            disabled={pending}
+            className={fieldClass(false)}
+          />
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -472,43 +759,20 @@ export function SaleForm({
         {errors?.productId && <p className="text-sm text-error">{errors.productId}</p>}
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="saleDate" className="text-sm font-medium text-foreground">
-            Fecha de venta
-          </label>
-          <input
-            id="saleDate"
-            name="saleDate"
-            type="date"
-            value={saleDate}
-            onChange={(event) => handleSaleDateChange(event.target.value)}
-            disabled={pending}
-            className={fieldClass(!!errors?.saleDate)}
-          />
-          {errors?.saleDate && <p className="text-sm text-error">{errors.saleDate}</p>}
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="installments" className="text-sm font-medium text-foreground">
-            Número de cuotas
-          </label>
-          <select
-            id="installments"
-            name="installments"
-            value={installmentsCount}
-            onChange={(event) => handleInstallmentsCountChange(Number(event.target.value))}
-            disabled={pending}
-            className={fieldClass(!!errors?.installments)}
-          >
-            {INSTALLMENT_OPTIONS.map((count) => (
-              <option key={count} value={count}>
-                {count} {count === 1 ? "cuota" : "cuotas"}
-              </option>
-            ))}
-          </select>
-          {errors?.installments && <p className="text-sm text-error">{errors.installments}</p>}
-        </div>
+      <div className="space-y-1">
+        <label htmlFor="saleDate" className="text-sm font-medium text-foreground">
+          Fecha de venta
+        </label>
+        <input
+          id="saleDate"
+          name="saleDate"
+          type="date"
+          value={saleDate}
+          onChange={(event) => handleSaleDateChange(event.target.value)}
+          disabled={pending}
+          className={fieldClass(!!errors?.saleDate)}
+        />
+        {errors?.saleDate && <p className="text-sm text-error">{errors.saleDate}</p>}
       </div>
 
       <div className="space-y-1">
@@ -557,252 +821,203 @@ export function SaleForm({
         )}
       </div>
 
-      <div className="space-y-1">
-        <label htmlFor="bankAccountId" className="text-sm font-medium text-foreground">
-          Cuenta bancaria de destino
-        </label>
-        <select
-          id="bankAccountId"
-          name="bankAccountId"
-          value={bankAccountId}
-          onChange={(event) => setBankAccountId(event.target.value)}
-          disabled={pending}
-          className={fieldClass(!!errors?.bankAccountId)}
-        >
-          <option value="" disabled>
-            Selecciona una cuenta bancaria…
-          </option>
-          {bankAccounts.map((account) => (
-            <option key={account.id} value={account.id}>
-              {account.bankName} — {account.alias} ({maskAccountNumber(account.accountNumber)})
-            </option>
-          ))}
-        </select>
-        <p className="text-xs text-muted-foreground">
-          Cuenta donde se espera recibir el pago de esta venta. El saldo solo se actualiza cuando
-          Contabilidad aprueba cada pago.
-        </p>
-        {errors?.bankAccountId && <p className="text-sm text-error">{errors.bankAccountId}</p>}
-      </div>
-
       <div className="space-y-3">
         <label className="text-sm font-medium text-foreground">Cuotas</label>
+        <input type="hidden" name="installments" value={installmentsCount} />
         <div className="space-y-3">
-          {Array.from({ length: installmentsCount }).map((_, index) => (
-            <div key={index} className="rounded-lg border border-border bg-surface p-4">
-              <p className="text-sm font-semibold text-foreground">Cuota {index + 1}</p>
-              <div className="mt-2 space-y-1">
-                <label
-                  htmlFor={`installmentAmount-${index}`}
-                  className="text-sm font-medium text-foreground"
-                >
-                  Monto
-                </label>
-                <div className="relative">
-                  <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground">
-                    $
-                  </span>
-                  <input
-                    id={`installmentAmount-${index}`}
-                    name="installmentAmounts"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    inputMode="decimal"
-                    value={installmentAmounts[index] ?? ""}
-                    onChange={(event) => handleInstallmentAmountChange(index, event.target.value)}
-                    disabled={pending}
-                    className={`${fieldClass(!!errors?.installmentAmounts?.[index])} pl-6`}
-                  />
-                </div>
-                {errors?.installmentAmounts?.[index] && (
-                  <p className="text-sm text-error">{errors.installmentAmounts[index]}</p>
-                )}
-              </div>
-              <div className="mt-2 space-y-1">
-                <label
-                  htmlFor={`installmentDueDate-${index}`}
-                  className="text-sm font-medium text-foreground"
-                >
-                  Fecha de vencimiento
-                </label>
-                <input
-                  id={`installmentDueDate-${index}`}
-                  name="installmentDueDates"
-                  type="date"
-                  value={dueDates[index] ?? ""}
-                  onChange={(event) => handleDueDateChange(index, event.target.value)}
-                  disabled={pending}
-                  className={fieldClass(!!errors?.installmentDates?.[index])}
-                />
-                {errors?.installmentDates?.[index] && (
-                  <p className="text-sm text-error">{errors.installmentDates[index]}</p>
-                )}
-              </div>
+          {Array.from({ length: installmentsCount }).map((_, index) => {
+            const cuotaAmountCents = installmentAmountCentsPreview[index] ?? 0;
+            const cuotaPaidCents = paidCentsForInstallment(index);
+            const cuotaPendingCents = Math.max(cuotaAmountCents - cuotaPaidCents, 0);
+            const cuotaExceeds = installmentPaymentsExceedCuota[index];
+            const cuota = cuotaPayments[index] ?? emptyCuotaPaymentState();
+            const methods = activeMethods(index);
 
-              <div className="mt-2 space-y-1">
-                <label
-                  htmlFor={`installmentPaymentMethod-${index}`}
-                  className="text-sm font-medium text-foreground"
-                >
-                  Forma de pago
-                </label>
-                <select
-                  id={`installmentPaymentMethod-${index}`}
-                  name={`installmentPaymentMethod-${index}`}
-                  value={installmentPaymentMethods[index] ?? ""}
-                  onChange={(event) =>
-                    handleInstallmentPaymentMethodChange(index, event.target.value)
-                  }
-                  disabled={pending}
-                  className={fieldClass(!!errors?.installmentPaymentMethods?.[index])}
-                >
-                  <option value="">Seleccionar forma de pago</option>
-                  {CUOTA_PAYMENT_METHODS.map((method) => (
-                    <option key={method} value={method}>
-                      {METHOD_LABELS[method]}
-                    </option>
-                  ))}
-                </select>
-                {errors?.installmentPaymentMethods?.[index] && (
-                  <p className="text-sm text-error">{errors.installmentPaymentMethods[index]}</p>
-                )}
-              </div>
+            return (
+              <div key={index} className="rounded-lg border border-border bg-surface p-4">
+                <p className="text-sm font-semibold text-foreground">Cuota {index + 1}</p>
 
-              {installmentPaymentMethods[index] && (
-                <div className="mt-3 space-y-3 rounded-md border border-border bg-black/[0.02] p-3">
-                  <div className="space-y-1">
+                {index === 0 ? (
+                  <div className="mt-2 space-y-1">
                     <label
-                      htmlFor={`installmentPaymentAmount-${index}`}
+                      htmlFor="firstInstallmentAmount"
                       className="text-sm font-medium text-foreground"
                     >
-                      Monto pagado
+                      {installmentsCount === 1 ? "Monto acordado" : "Primera cuota acordada"}
                     </label>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground">
-                        $
-                      </span>
-                      <input
-                        id={`installmentPaymentAmount-${index}`}
-                        name={`installmentPaymentAmount-${index}`}
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        inputMode="decimal"
-                        value={installmentPaymentAmounts[index] ?? ""}
-                        onChange={(event) =>
-                          handleInstallmentPaymentAmountChange(index, event.target.value)
-                        }
-                        disabled={pending}
-                        className={`${fieldClass(!!errors?.installmentPaymentAmounts?.[index])} pl-6`}
-                      />
-                    </div>
-                    {errors?.installmentPaymentAmounts?.[index] && (
-                      <p className="text-sm text-error">
-                        {errors.installmentPaymentAmounts[index]}
+                    {installmentsCount === 1 ? (
+                      <p className="rounded-md border border-border bg-black/[0.02] px-3 py-2 text-sm text-foreground">
+                        {currencyFormatter.format(cuotaAmountCents / 100)}
                       </p>
+                    ) : (
+                      <>
+                        <div className="relative">
+                          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground">
+                            $
+                          </span>
+                          <input
+                            id="firstInstallmentAmount"
+                            name="firstInstallmentAmount"
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={firstInstallmentAmount}
+                            onChange={(event) => handleFirstInstallmentAmountChange(event.target.value)}
+                            disabled={pending}
+                            className={`${fieldClass(!!firstInstallmentError)} pl-6`}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          El saldo restante se reparte automáticamente en partes iguales entre las
+                          demás cuotas.
+                        </p>
+                      </>
+                    )}
+                    {firstInstallmentError && (
+                      <p className="text-sm text-error">{firstInstallmentError}</p>
                     )}
                   </div>
+                ) : (
+                  <div className="mt-2 space-y-1">
+                    <span className="text-sm font-medium text-foreground">
+                      Monto acordado <span className="font-normal text-muted-foreground">(calculado automáticamente)</span>
+                    </span>
+                    <p className="rounded-md border border-border bg-black/[0.02] px-3 py-2 text-sm text-foreground">
+                      {currencyFormatter.format(cuotaAmountCents / 100)}
+                    </p>
+                  </div>
+                )}
 
-                  {installmentPaymentMethods[index] === PaymentMethod.CASH ? (
-                    <div className="space-y-1">
-                      <label
-                        htmlFor={`installmentPaymentReceivedByName-${index}`}
-                        className="text-sm font-medium text-foreground"
-                      >
-                        Entregado a
-                      </label>
-                      <input
-                        id={`installmentPaymentReceivedByName-${index}`}
-                        name={`installmentPaymentReceivedByName-${index}`}
-                        value={installmentPaymentReceivedByNames[index] ?? ""}
-                        onChange={(event) =>
-                          handleInstallmentPaymentReceivedByNameChange(index, event.target.value)
-                        }
-                        disabled={pending}
-                        className={fieldClass(
-                          !!(
-                            errors?.installmentPaymentReceivedByNames?.[index] ??
-                            installmentPaymentReceivedByNameClientErrors[index]
-                          ),
-                        )}
-                      />
-                      {(errors?.installmentPaymentReceivedByNames?.[index] ??
-                        installmentPaymentReceivedByNameClientErrors[index]) && (
-                        <p className="text-sm text-error">
-                          {errors?.installmentPaymentReceivedByNames?.[index] ??
-                            installmentPaymentReceivedByNameClientErrors[index]}
-                        </p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-1">
-                      <label
-                        htmlFor={`installmentPaymentReceipt-${index}`}
-                        className="text-sm font-medium text-foreground"
-                      >
-                        Voucher *
-                      </label>
-                      <input
-                        ref={(el) => {
-                          installmentPaymentReceiptRefs.current[index] = el;
-                        }}
-                        id={`installmentPaymentReceipt-${index}`}
-                        name={`installmentPaymentReceipt-${index}`}
-                        type="file"
-                        accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
-                        disabled={pending}
-                        onChange={() =>
-                          setInstallmentPaymentReceiptClientErrors((previous) =>
-                            previous.map((e, i) => (i === index ? null : e)),
-                          )
-                        }
-                        className={fieldClass(
-                          !!(
-                            errors?.installmentPaymentReceipts?.[index] ??
-                            installmentPaymentReceiptClientErrors[index]
-                          ),
-                        )}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        PDF, JPG, PNG o WEBP. Máximo 5 MB.
-                      </p>
-                      {(errors?.installmentPaymentReceipts?.[index] ??
-                        installmentPaymentReceiptClientErrors[index]) && (
-                        <p className="text-sm text-error">
-                          {errors?.installmentPaymentReceipts?.[index] ??
-                            installmentPaymentReceiptClientErrors[index]}
+                <div className="mt-2 space-y-1">
+                  <label
+                    htmlFor={`installmentDueDate-${index}`}
+                    className="text-sm font-medium text-foreground"
+                  >
+                    Fecha de vencimiento
+                  </label>
+                  <input
+                    id={`installmentDueDate-${index}`}
+                    name="installmentDueDates"
+                    type="date"
+                    value={dueDates[index] ?? ""}
+                    onChange={(event) => handleDueDateChange(index, event.target.value)}
+                    disabled={pending}
+                    className={fieldClass(!!errors?.installmentDates?.[index])}
+                  />
+                  {errors?.installmentDates?.[index] && (
+                    <p className="text-sm text-error">{errors.installmentDates[index]}</p>
+                  )}
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  <div className="space-y-1">
+                    <label
+                      htmlFor={`cuotaMode-${index}`}
+                      className="text-sm font-medium text-foreground"
+                    >
+                      Forma de pago
+                    </label>
+                    <select
+                      id={`cuotaMode-${index}`}
+                      value={cuota.mode}
+                      onChange={(event) => handleModeChange(index, event.target.value)}
+                      disabled={pending}
+                      className={fieldClass(false)}
+                    >
+                      <option value="">Sin pago registrado todavía</option>
+                      {PAYMENT_METHODS.map((method) => (
+                        <option key={method} value={method}>
+                          {METHOD_LABELS[method]}
+                        </option>
+                      ))}
+                      <option value={MIXED}>Mixto</option>
+                    </select>
+                  </div>
+
+                  {cuota.mode === MIXED && (
+                    <div className="space-y-2 rounded-md border border-border bg-black/[0.02] p-3">
+                      <p className="text-sm font-medium text-foreground">Selecciona las formas de pago</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {PAYMENT_METHODS.map((method) => (
+                          <label
+                            key={method}
+                            className="flex items-center gap-2 text-sm text-foreground"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={cuota.mixedMethods.includes(method)}
+                              onChange={(event) => toggleMixedMethod(index, method, event.target.checked)}
+                              disabled={pending}
+                              className="h-4 w-4 rounded border-border"
+                            />
+                            {METHOD_LABELS[method]}
+                          </label>
+                        ))}
+                      </div>
+                      {cuota.mixedMethods.length === 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          Marca al menos una forma de pago para registrar el pago mixto.
                         </p>
                       )}
                     </div>
                   )}
 
-                  <div className="space-y-1">
-                    <label
-                      htmlFor={`installmentPaymentNotes-${index}`}
-                      className="text-sm font-medium text-foreground"
-                    >
-                      Observación{" "}
-                      <span className="font-normal text-muted-foreground">(opcional)</span>
-                    </label>
-                    <textarea
-                      id={`installmentPaymentNotes-${index}`}
-                      name={`installmentPaymentNotes-${index}`}
-                      rows={2}
-                      value={installmentPaymentNotesValues[index] ?? ""}
-                      onChange={(event) =>
-                        handleInstallmentPaymentNotesChange(index, event.target.value)
-                      }
-                      disabled={pending}
-                      className={fieldClass(false)}
-                    />
-                  </div>
+                  {methods.map((method, row) =>
+                    renderMethodBlock(index, method, row, cuota.mode === MIXED),
+                  )}
+
+                  {methods.length === 0 && cuota.mode !== MIXED && (
+                    <p className="text-xs text-muted-foreground">Sin pagos registrados todavía.</p>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+
+                <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-sm">
+                  <span className="text-muted-foreground">
+                    Pagado:{" "}
+                    <span className="font-medium text-foreground">
+                      {currencyFormatter.format(cuotaPaidCents / 100)}
+                    </span>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Pendiente:{" "}
+                    <span className="font-medium text-foreground">
+                      {currencyFormatter.format(cuotaPendingCents / 100)}
+                    </span>
+                  </span>
+                </div>
+                {(errors?.installmentPaymentsTotal?.[index] || cuotaExceeds) && (
+                  <p className="mt-1 text-sm text-error">
+                    {errors?.installmentPaymentsTotal?.[index] ??
+                      "La suma de los pagos supera el monto de la cuota."}
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
-        {installmentsTotalError && <p className="text-sm text-error">{installmentsTotalError}</p>}
+
+        <div className="flex items-center gap-4">
+          <button
+            type="button"
+            onClick={handleAddCuota}
+            disabled={pending || installmentsCount >= MAX_INSTALLMENTS}
+            className="text-sm font-medium text-primary transition-colors hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            + Agregar otra cuota
+          </button>
+          {installmentsCount > 1 && (
+            <button
+              type="button"
+              onClick={handleRemoveCuota}
+              disabled={pending}
+              className="text-sm font-medium text-error transition-colors hover:underline"
+            >
+              Quitar cuota {installmentsCount}
+            </button>
+          )}
+        </div>
+        {errors?.installments && <p className="text-sm text-error">{errors.installments}</p>}
       </div>
 
       <div className="rounded-lg border border-border bg-black/[0.02] p-4">
@@ -819,42 +1034,19 @@ export function SaleForm({
           <dd className="col-span-1 text-right text-lg font-bold text-primary sm:col-span-2">
             {currencyFormatter.format(finalPrice)}
           </dd>
-          <dt className="text-muted-foreground">Total en cuotas</dt>
+          <dt className="text-muted-foreground">Total pagado</dt>
           <dd className="col-span-1 text-right font-medium text-foreground sm:col-span-2">
-            {currencyFormatter.format(totalInstallmentsCents / 100)}
+            {currencyFormatter.format(totalPaidCents / 100)}
           </dd>
           <dt className="font-semibold text-foreground">Saldo pendiente</dt>
-          <dd
-            className={`col-span-1 text-right text-lg font-bold sm:col-span-2 ${
-              installmentsMismatchFinalPrice ? "text-error" : "text-primary"
-            }`}
-          >
-            {currencyFormatter.format(remainingBalanceCents / 100)}
+          <dd className="col-span-1 text-right text-lg font-bold text-primary sm:col-span-2">
+            {currencyFormatter.format(saleBalanceCents / 100)}
           </dd>
         </dl>
         <p className="mt-2 text-xs text-muted-foreground">
-          El precio final se recalcula y valida en el servidor; esta vista es solo una referencia.
-          La suma de las cuotas debe coincidir exactamente con el precio final.
+          El precio final y el monto de cada cuota se recalculan y validan en el servidor; esta
+          vista es solo una referencia.
         </p>
-      </div>
-
-      <div className="space-y-1">
-        <label htmlFor="receipt" className="text-sm font-medium text-foreground">
-          Adjuntar comprobante *
-        </label>
-        <input
-          ref={receiptInputRef}
-          id="receipt"
-          name="receipt"
-          type="file"
-          accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
-          required
-          disabled={pending}
-          onChange={() => setReceiptClientError(null)}
-          className={fieldClass(!!receiptError)}
-        />
-        <p className="text-xs text-muted-foreground">PDF, JPG, PNG o WEBP. Máximo 5 MB.</p>
-        {receiptError && <p className="text-sm text-error">{receiptError}</p>}
       </div>
 
       {formError && <p className="text-sm text-error">{formError}</p>}

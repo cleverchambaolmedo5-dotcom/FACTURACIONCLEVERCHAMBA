@@ -178,6 +178,13 @@ export type CreateSaleInstallmentPaymentData = {
   notes?: string;
   // Only set for method = CASH ("Entregado a") -- see Payment.receivedByName.
   receivedByName?: string;
+  // Only set for method = BANK_TRANSFER/DEPOSIT/CARD -- see
+  // Payment.bankAccountId. Each payment row keeps its own account rather
+  // than sharing one sale-wide value, since a sale's cuotas (or several
+  // payments within one cuota) can each land in a different bank account;
+  // for CARD, sale-service.ts always resolves this to the one fixed
+  // CARD-payment account, never a seller choice.
+  bankAccountId?: string;
   registeredById: string;
   // Absent for method = CASH (no voucher collected for cash payments).
   receipt?: CreateSaleReceiptData;
@@ -187,19 +194,15 @@ export type CreateSaleData = {
   customerId: string;
   sellerId: string;
   productId: string;
-  // The bank account selected as this sale's payment destination. Required
-  // by application logic (sale-service.ts#createSaleForUser) for every new
-  // sale -- optional here only so the column itself doesn't force the
-  // relation beyond what that validation already guarantees.
-  bankAccountId: string;
   saleDate: Date;
   originalPrice: string;
   discount: string;
   finalPrice: string;
   installments: CreateSaleInstallmentData[];
-  // Required -- see sale-service.ts#createSaleForUser, which never reaches
-  // this call without an already-saved receipt file.
-  receipt: CreateSaleReceiptData;
+  // Optional -- the "Nueva venta" flow no longer requires a general
+  // receipt (each installment's own payment record backs the sale
+  // instead); see the validation in sale-service.ts#createSaleForUser.
+  receipt?: CreateSaleReceiptData;
   // One entry per installment that already had a "forma de pago" selected
   // at sale creation time -- see CreateSaleInstallmentPaymentData above.
   // Never more entries than `installments`, and always empty for a sale
@@ -208,14 +211,15 @@ export type CreateSaleData = {
 };
 
 /**
- * Creates a Sale together with all of its Installments and its
- * SaleReceipt in a single transaction: it must never be possible to end up
- * with a Sale that has no installments (or installments without a Sale),
- * or a Sale with no receipt, due to a partial failure. When
- * `installmentPayments` entries are present, the Payment (+ PaymentReceipt,
- * when the method requires a voucher) for each of those specific
- * installments is created in this same transaction, so a sale can never end
- * up "missing" a cuota payment its own creation reported succeeding.
+ * Creates a Sale together with all of its Installments (and its
+ * SaleReceipt, only when one is provided) in a single transaction: it must
+ * never be possible to end up with a Sale that has no installments (or
+ * installments without a Sale), or a partially-created receipt, due to a
+ * partial failure. When `installmentPayments` entries are present, the
+ * Payment (+ PaymentReceipt, when the method requires a voucher) for each
+ * of those specific installments is created in this same transaction, so a
+ * sale can never end up "missing" a cuota payment its own creation reported
+ * succeeding.
  */
 export async function createSaleWithInstallments(data: CreateSaleData) {
   return prisma.$transaction(async (tx) => {
@@ -224,7 +228,6 @@ export async function createSaleWithInstallments(data: CreateSaleData) {
         customerId: data.customerId,
         sellerId: data.sellerId,
         productId: data.productId,
-        bankAccountId: data.bankAccountId,
         saleDate: data.saleDate,
         originalPrice: data.originalPrice,
         discount: data.discount,
@@ -236,14 +239,18 @@ export async function createSaleWithInstallments(data: CreateSaleData) {
             dueDate: installment.dueDate,
           })),
         },
-        receipt: {
-          create: {
-            fileUrl: data.receipt.fileUrl,
-            fileName: data.receipt.fileName,
-            fileType: data.receipt.fileType,
-            uploadedById: data.receipt.uploadedById,
-          },
-        },
+        ...(data.receipt
+          ? {
+              receipt: {
+                create: {
+                  fileUrl: data.receipt.fileUrl,
+                  fileName: data.receipt.fileName,
+                  fileType: data.receipt.fileType,
+                  uploadedById: data.receipt.uploadedById,
+                },
+              },
+            }
+          : {}),
       },
       select: { id: true, installments: { select: { id: true, installmentNumber: true } } },
     });
@@ -256,6 +263,7 @@ export async function createSaleWithInstallments(data: CreateSaleData) {
 
       const payment = await paymentRepository.createPayment(tx, {
         installmentId: targetInstallment.id,
+        bankAccountId: installmentPayment.bankAccountId,
         amount: installmentPayment.amount,
         paymentDate: installmentPayment.paymentDate,
         method: installmentPayment.method,

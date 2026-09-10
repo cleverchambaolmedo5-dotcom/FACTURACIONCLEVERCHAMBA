@@ -258,12 +258,13 @@ model Sale {
   customerId String @db.Uuid
   sellerId   String @db.Uuid
   productId  String @db.Uuid
-  // The bank account the customer is expected to pay into. Selected by the
-  // seller/admin at sale creation time -- this only records *where* the
-  // money should land, it never moves BankAccount.balance itself (see
-  // BankTransaction). Optional/nullable so sales created before this field
-  // existed remain valid, unmodified rows; application logic
-  // (sale-service.ts#createSaleForUser) requires it for every new sale.
+  // Legacy sale-wide destination account. No longer collected on new sales
+  // -- each Payment now carries its own bankAccountId instead, since a
+  // sale's cuotas (or several payments within one cuota) can each land in a
+  // different account (see Payment.bankAccountId). Kept only so sales
+  // created before this move remain valid, unmodified rows;
+  // approvePaymentForUser (payment-service.ts) still falls back to this
+  // field for a payment with no bankAccountId of its own.
   bankAccountId String? @db.Uuid
 
   saleDate DateTime @default(now())

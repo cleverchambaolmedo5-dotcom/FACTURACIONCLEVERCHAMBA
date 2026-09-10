@@ -34,11 +34,12 @@ export type SaleFieldErrors = Partial<
     | "installments"
     | "sellerId"
     | "receipt"
-    | "bankAccountId"
-    // Aggregate mismatch between the sum of installment amounts and the
-    // sale's final price -- not tied to any single cuota, hence a flat
-    // message rather than a per-index array like installmentAmounts below.
-    | "installmentsTotal",
+    // The seller-entered amount for installment 1 -- the only cuota amount
+    // ever submitted by the client. Installments 2/3 are always computed
+    // server-side from this and finalPriceCents (see the validation below),
+    // so their sum can never mismatch finalPriceCents and needs no error of
+    // its own.
+    | "firstInstallmentAmount",
     string
   >
 > & {
@@ -46,18 +47,25 @@ export type SaleFieldErrors = Partial<
   // flat message -- the form needs to point at exactly which cuota's
   // date is invalid.
   installmentDates?: (string | undefined)[];
-  // Same per-index shape as installmentDates, for each cuota's manually
-  // entered amount.
-  installmentAmounts?: (string | undefined)[];
-  // --- Per-cuota "forma de pago" (optional, independent per installment):
-  // one entry per installment index, aligned the same way as
-  // installmentDates/installmentAmounts above. Only populated for a cuota
-  // where a forma de pago was actually selected -- see createSaleForUser's
-  // per-cuota payment block below.
-  installmentPaymentMethods?: (string | undefined)[];
-  installmentPaymentAmounts?: (string | undefined)[];
-  installmentPaymentReceivedByNames?: (string | undefined)[];
-  installmentPaymentReceipts?: (string | undefined)[];
+  // --- Per-cuota payments (CUOTA vs. PAGO): a cuota can have one or more
+  // Payments, each with its own amount/method/voucher -- see
+  // createSaleForUser's per-cuota payment block below. Every array here is
+  // 2D, indexed first by installment (0..installmentsCount-1) and then by
+  // payment row within that installment (0..MAX_PAYMENTS_PER_INSTALLMENT-1).
+  // An installment with no payments yet, or a payment row with no method
+  // selected, simply has no entry -- both are entirely optional per index.
+  installmentPaymentMethods?: (string | undefined)[][];
+  installmentPaymentAmounts?: (string | undefined)[][];
+  installmentPaymentReceivedByNames?: (string | undefined)[][];
+  installmentPaymentReceipts?: (string | undefined)[][];
+  // Only set for a row whose method is BANK_TRANSFER, DEPOSIT or CARD --
+  // CASH rows never require a destination account. A CARD row's account is
+  // always the fixed one from getCardPaymentBankAccountForSaleForm, never a
+  // seller choice (see the validation below).
+  installmentPaymentBankAccountIds?: (string | undefined)[][];
+  // One entry per installment (not per payment row): set when that cuota's
+  // payments sum to more than its own amount.
+  installmentPaymentsTotal?: (string | undefined)[];
 };
 
 export type SaleActionResult =
@@ -71,32 +79,52 @@ export type RawSaleInput = {
   discount?: FormDataEntryValue | null;
   installments?: FormDataEntryValue | null;
   sellerId?: FormDataEntryValue | null;
-  // The bank account the customer is expected to pay into. Required for
-  // every new sale -- see the validation in createSaleForUser below.
-  bankAccountId?: FormDataEntryValue | null;
   // One value per installment, in installment order (e.g. FormData's
   // getAll("installmentDueDates")).
   installmentDueDates?: FormDataEntryValue[];
-  // One manually-entered monetary amount per installment, in installment
-  // order (e.g. FormData's getAll("installmentAmounts")). Replaces the
-  // old server-computed even split -- see the validation below.
-  installmentAmounts?: FormDataEntryValue[];
-  // Mandatory -- a Sale can never be created without a receipt attached,
-  // see the validation in createSaleForUser below.
+  // The seller-entered amount for installment 1 only. Installments 2/3 (when
+  // present) are never submitted -- they're always computed server-side by
+  // splitting the remaining balance evenly (see the validation below), per
+  // the "cuota 1 configurable, el resto automático" business rule. Ignored
+  // entirely when installments = 1 (that single cuota is always the full
+  // finalPriceCents).
+  firstInstallmentAmount?: FormDataEntryValue | null;
+  // Optional -- the "Nueva venta" flow no longer requires a general
+  // receipt; see the validation in createSaleForUser below.
   receipt?: FormDataEntryValue | null;
-  // --- Per-cuota "forma de pago" (optional, independent per installment):
-  // one value per installment, in installment order -- an empty string
-  // means no method was selected for that cuota (the common case; it just
-  // starts PENDING like today). Every other field below is only
-  // validated/required for an index whose method isn't empty, and
-  // installmentPaymentReceivedByNames only applies when that index's
-  // method is CASH (installmentPaymentReceipts only when it isn't).
-  installmentPaymentMethods?: FormDataEntryValue[];
-  installmentPaymentAmounts?: FormDataEntryValue[];
-  installmentPaymentReceivedByNames?: FormDataEntryValue[];
-  installmentPaymentNotes?: FormDataEntryValue[];
-  installmentPaymentReceipts?: FormDataEntryValue[];
+  // --- Per-cuota payments (CUOTA vs. PAGO, see the validation below): 2D,
+  // indexed first by installment then by payment row within it (mirrors
+  // ventas/actions.ts's own getIndexed2D/MAX_PAYMENTS_PER_INSTALLMENT,
+  // which must stay in sync with this module's own constant of the same
+  // name). A payment row with an empty method means "no payment there" --
+  // the common case for most rows. Every other field below is only
+  // validated/required for a row whose method isn't empty, and
+  // installmentPaymentReceivedByNames only applies when that row's method is
+  // CASH (installmentPaymentReceipts only when it isn't).
+  installmentPaymentMethods?: FormDataEntryValue[][];
+  installmentPaymentAmounts?: FormDataEntryValue[][];
+  installmentPaymentReceivedByNames?: FormDataEntryValue[][];
+  installmentPaymentNotes?: FormDataEntryValue[][];
+  installmentPaymentReceipts?: FormDataEntryValue[][];
+  // The bank account each BANK_TRANSFER/DEPOSIT payment row lands in -- a
+  // sale can mix several payments across different cuotas (or different
+  // methods within the same cuota), each into its own account, so this is
+  // never a single sale-wide value (see Payment.bankAccountId in
+  // schema.prisma). For a CARD row this is expected to already be the fixed
+  // account id the form renders as read-only (see
+  // getCardPaymentBankAccountForSaleForm) -- the server re-validates that
+  // below rather than trusting it. Ignored for CASH rows.
+  installmentPaymentBankAccountIds?: FormDataEntryValue[][];
 };
+
+// A cuota can have several Payments (e.g. part cash, part transfer), but the
+// number of rows the form can submit per installment still needs a fixed
+// upper bound so the Server Action can read fixed-name indexed fields
+// (`installmentPaymentMethod-<i>-<j>`) out of FormData without knowing in
+// advance how many rows the client rendered. 5 is a generous ceiling for a
+// single cuota's payments in practice. Must match sale-form.tsx's own
+// MAX_PAYMENTS_PER_INSTALLMENT and ventas/actions.ts's getIndexed2D bound.
+const MAX_PAYMENTS_PER_INSTALLMENT = 5;
 
 function str(value: FormDataEntryValue | null | undefined): string {
   return typeof value === "string" ? value.trim() : "";
@@ -120,6 +148,21 @@ function toCents(amount: number): number {
 
 function centsToDecimalString(cents: number): string {
   return (cents / 100).toFixed(2);
+}
+
+/**
+ * Splits `totalCents` into `count` shares that sum exactly back to
+ * `totalCents` -- the floor share for the first `count - 1` shares, with the
+ * last absorbing whatever rounding remainder is left, so money is never
+ * gained or lost to rounding (mirrors sale-form.tsx's own
+ * distributeCentsPreview, used there only for the live preview).
+ */
+function distributeCentsEvenly(totalCents: number, count: number): number[] {
+  const base = Math.floor(totalCents / count);
+  const remainder = totalCents - base * count;
+  const shares = Array<number>(count).fill(base);
+  shares[count - 1] += remainder;
+  return shares;
 }
 
 function isValidSaleStatus(value: string | undefined): value is SaleStatus {
@@ -210,15 +253,45 @@ export function listProductsForSaleForm() {
 }
 
 /**
- * Active bank accounts, for the sale form's "cuenta bancaria de destino"
- * selector. Available to every role that can reach the sale form (ADMIN,
- * SELLER) -- unlike the /cuentas-bancarias module itself (ADMIN/ACCOUNTANT
- * only, see rbac.ts), a SELLER must be able to pick a destination account
- * when creating a sale without gaining any other access to that module
- * (they still can't view/manage accounts there).
+ * Active bank accounts, for the sale form's per-payment "cuenta bancaria de
+ * destino" selector (shown under each BANK_TRANSFER/DEPOSIT forma de pago
+ * block, never at the sale level -- a sale's cuotas can each be paid into a
+ * different account). Available to every role that can reach the sale form
+ * (ADMIN, SELLER) -- unlike the /cuentas-bancarias module itself (ADMIN/
+ * ACCOUNTANT only, see rbac.ts), a SELLER must be able to pick a destination
+ * account when registering a payment without gaining any other access to
+ * that module (they still can't view/manage accounts there).
  */
 export function listBankAccountsForSaleForm() {
   return bankAccountRepository.listActiveBankAccounts();
+}
+
+/**
+ * The single BankAccount every CARD (tarjeta) payment must be credited to --
+ * configured once via the CARD_PAYMENT_BANK_ACCOUNT_ID env var, never chosen
+ * by the seller. Unlike BANK_TRANSFER/DEPOSIT (any active account works), a
+ * CARD payment row is only ever valid against this exact account, since in
+ * practice every card terminal settles into the same Banco Guayaquil
+ * account. Returns undefined when the env var is unset/blank/not a UUID, or
+ * doesn't resolve to a currently-active account -- createSaleForUser then
+ * refuses every CARD row with a clear error rather than silently allowing
+ * an unconfigured/arbitrary destination.
+ */
+function cardPaymentBankAccountIdFromEnv(): string | undefined {
+  const id = process.env.CARD_PAYMENT_BANK_ACCOUNT_ID?.trim();
+  return id && isValidUuid(id) ? id : undefined;
+}
+
+/**
+ * Resolves the fixed CARD-payment bank account (see
+ * cardPaymentBankAccountIdFromEnv above) -- used both by createSaleForUser's
+ * validation and by the sale form (to render it as a locked field) so both
+ * always agree on exactly the same account.
+ */
+export async function getCardPaymentBankAccountForSaleForm() {
+  const id = cardPaymentBankAccountIdFromEnv();
+  if (!id) return null;
+  return bankAccountRepository.findActiveBankAccountById(id);
 }
 
 /**
@@ -308,23 +381,6 @@ export async function createSaleForUser(
     product = await saleRepository.findActiveProductById(productId);
     if (!product) {
       errors.productId = "Selecciona un producto activo válido.";
-    }
-  }
-
-  // --- Bank account: the sale's payment destination. Must exist and be
-  // active, recomputed here from the database -- never trusted from the
-  // client. Saved on the sale but never used to touch any balance here;
-  // the balance only ever moves once a payment against this sale is
-  // approved (see payment-service.ts#approvePaymentForUser).
-  const bankAccountId = str(raw.bankAccountId);
-  let bankAccount: Awaited<ReturnType<typeof bankAccountRepository.findActiveBankAccountById>> =
-    null;
-  if (!bankAccountId || !isValidUuid(bankAccountId)) {
-    errors.bankAccountId = "Selecciona una cuenta bancaria válida.";
-  } else {
-    bankAccount = await bankAccountRepository.findActiveBankAccountById(bankAccountId);
-    if (!bankAccount) {
-      errors.bankAccountId = "Selecciona una cuenta bancaria activa válida.";
     }
   }
 
@@ -420,158 +476,234 @@ export async function createSaleForUser(
     }
   }
 
-  // --- Installment amounts: one manually-entered amount per installment,
-  // replacing the old server-computed even split. Each must be a valid,
-  // non-negative monetary value; client-side totals are never trusted --
-  // only re-validated and summed here. Their sum must land exactly on the
-  // true finalPriceCents computed above from the database-backed product
-  // price and discount (never the client's own displayed total), so every
-  // downstream ledger figure that assumes installments == finalPrice
+  // --- Installment amounts: CUOTA = the agreed amount the customer owes,
+  // never the money actually handed over (that's a Payment, validated
+  // separately below). The seller only ever sets installment 1's amount;
+  // every other installment is computed here by splitting whatever is left
+  // of finalPriceCents evenly across the remaining installments (the last
+  // one absorbing any rounding remainder, via distributeCentsEvenly) -- so
+  // their sum always lands exactly on finalPriceCents by construction, and
+  // every downstream ledger figure that assumes installments == finalPrice
   // (e.g. dashboard-service.ts's collectedCents + pendingToCollectCents)
-  // keeps holding.
+  // keeps holding. Never trusted from the client beyond the first amount.
   const installmentAmountCents: number[] = [];
-  if (hasValidInstallmentsCount) {
-    const amountErrors: (string | undefined)[] = [];
-    const rawAmounts = (raw.installmentAmounts ?? []).map(str);
-
-    for (let index = 0; index < installmentsCount; index += 1) {
-      const rawAmount = rawAmounts[index] ?? "";
-      const amountValue = Number(rawAmount);
-      if (!rawAmount || !Number.isFinite(amountValue)) {
-        amountErrors[index] = "El monto de la cuota es obligatorio.";
-      } else if (amountValue <= 0) {
-        amountErrors[index] = "El monto de la cuota debe ser mayor a cero.";
+  if (hasValidInstallmentsCount && product) {
+    const trueFinalPriceCents = originalPriceCents - discountCents;
+    if (installmentsCount === 1) {
+      // A single cuota is always the full price -- nothing for the seller
+      // to configure.
+      installmentAmountCents[0] = trueFinalPriceCents;
+    } else {
+      const firstRaw = str(raw.firstInstallmentAmount);
+      const firstValue = Number(firstRaw);
+      if (!firstRaw || !Number.isFinite(firstValue)) {
+        errors.firstInstallmentAmount = "El monto de la primera cuota es obligatorio.";
+      } else if (firstValue <= 0) {
+        errors.firstInstallmentAmount = "El monto de la primera cuota debe ser mayor a cero.";
       } else {
-        installmentAmountCents[index] = toCents(amountValue);
-      }
-    }
-
-    if (amountErrors.some((message) => message !== undefined)) {
-      errors.installmentAmounts = amountErrors;
-    } else if (product && installmentAmountCents.length === installmentsCount) {
-      const totalAmountCents = installmentAmountCents.reduce((sum, cents) => sum + cents, 0);
-      const trueFinalPriceCents = originalPriceCents - discountCents;
-      if (totalAmountCents > trueFinalPriceCents) {
-        errors.installmentsTotal =
-          "La suma de las cuotas no puede superar el precio final de la venta.";
-      } else if (totalAmountCents < trueFinalPriceCents) {
-        errors.installmentsTotal = "La suma de las cuotas debe ser igual al precio final de la venta.";
+        const firstCents = toCents(firstValue);
+        const remainingCount = installmentsCount - 1;
+        const remainderCents = trueFinalPriceCents - firstCents;
+        if (firstCents >= trueFinalPriceCents) {
+          errors.firstInstallmentAmount =
+            "El monto de la primera cuota debe ser menor al precio final de la venta.";
+        } else if (remainderCents < remainingCount) {
+          // Not enough left over to give every remaining cuota at least one
+          // cent -- an edge case, but the rounding rule below only ever
+          // adds whole cents.
+          errors.firstInstallmentAmount =
+            "El monto de la primera cuota deja un saldo insuficiente para repartir entre las demás cuotas.";
+        } else {
+          installmentAmountCents[0] = firstCents;
+          distributeCentsEvenly(remainderCents, remainingCount).forEach((cents, shareIndex) => {
+            installmentAmountCents[1 + shareIndex] = cents;
+          });
+        }
       }
     }
   }
 
-  // --- Per-cuota "forma de pago" (optional, independent per installment):
-  // for any installment whose forma de pago was actually selected, this
-  // validates that cuota's payment data exactly like registerPaymentForUser
-  // validates a manually-registered payment (amount/method, plus either
-  // "Entregado a" for CASH or a mandatory voucher for every other method),
-  // plus one extra rule specific to this entry point: the amount can never
-  // exceed that installment's own amount, since it can only ever pay that
-  // one cuota. Entirely opt-in per index -- an index with no method
-  // selected is skipped entirely, so existing sales (and any cuota left
-  // unpaid at creation time) are completely unaffected.
-  const installmentPaymentMethods: (PaymentMethod | null)[] = [];
-  const installmentPaymentAmountCents: number[] = [];
-  const installmentPaymentReceivedByNames: (string | undefined)[] = [];
-  const installmentPaymentNotesValues: (string | undefined)[] = [];
-  const installmentPaymentReceiptFiles: (File | null)[] = [];
+  // --- Per-cuota payments (CUOTA vs. PAGO vs. FORMA DE PAGO): a cuota can
+  // have one or several Payments -- e.g. $100 cash + $200 transfer against
+  // the same $300 cuota -- each validated exactly like
+  // registerPaymentForUser validates a manually-registered payment
+  // (amount/method, plus either "Entregado a" for CASH or a mandatory
+  // voucher for every other method). The one extra rule specific to this
+  // entry point: the *sum* of a cuota's payments can never exceed that
+  // cuota's own amount, checked once per installment after every row is
+  // parsed (not per row, since two valid-looking individual amounts can
+  // still jointly overpay the cuota). Entirely opt-in per row -- a row with
+  // no method selected is skipped entirely, so a cuota can be left
+  // unpaid, partially paid, or paid through several rows, all without
+  // creating any extra Installment.
+  const installmentPaymentMethods: (PaymentMethod | null)[][] = [];
+  const installmentPaymentAmountCents: (number | null)[][] = [];
+  const installmentPaymentReceivedByNames: (string | undefined)[][] = [];
+  const installmentPaymentNotesValues: (string | undefined)[][] = [];
+  const installmentPaymentReceiptFiles: (File | null)[][] = [];
+  const installmentPaymentBankAccountIds: (string | undefined)[][] = [];
 
   if (hasValidInstallmentsCount) {
-    const methodErrors: (string | undefined)[] = [];
-    const amountErrors: (string | undefined)[] = [];
-    const receivedByNameErrors: (string | undefined)[] = [];
-    const receiptErrors: (string | undefined)[] = [];
-    const rawMethods = (raw.installmentPaymentMethods ?? []).map(str);
-    const rawAmounts = (raw.installmentPaymentAmounts ?? []).map(str);
-    const rawReceivedByNames = (raw.installmentPaymentReceivedByNames ?? []).map(str);
-    const rawNotes = (raw.installmentPaymentNotes ?? []).map(str);
-    const rawReceipts = raw.installmentPaymentReceipts ?? [];
+    // Resolved once, outside the per-row loop below, so every CARD row in
+    // this submission is checked against the exact same fixed account.
+    const fixedCardBankAccount = await getCardPaymentBankAccountForSaleForm();
+
+    const methodErrors: (string | undefined)[][] = [];
+    const amountErrors: (string | undefined)[][] = [];
+    const receivedByNameErrors: (string | undefined)[][] = [];
+    const receiptErrors: (string | undefined)[][] = [];
+    const bankAccountErrors: (string | undefined)[][] = [];
+    const totalErrors: (string | undefined)[] = [];
 
     for (let index = 0; index < installmentsCount; index += 1) {
-      const methodRaw = rawMethods[index] ?? "";
-      if (!methodRaw) {
-        installmentPaymentMethods[index] = null;
-        continue;
-      }
-      if (!isValidPaymentMethod(methodRaw)) {
-        methodErrors[index] = "Selecciona una forma de pago válida.";
-        installmentPaymentMethods[index] = null;
-        continue;
-      }
-      installmentPaymentMethods[index] = methodRaw;
+      installmentPaymentMethods[index] = [];
+      installmentPaymentAmountCents[index] = [];
+      installmentPaymentReceivedByNames[index] = [];
+      installmentPaymentNotesValues[index] = [];
+      installmentPaymentReceiptFiles[index] = [];
+      installmentPaymentBankAccountIds[index] = [];
+      methodErrors[index] = [];
+      amountErrors[index] = [];
+      receivedByNameErrors[index] = [];
+      receiptErrors[index] = [];
+      bankAccountErrors[index] = [];
 
-      const amountRaw = rawAmounts[index] ?? "";
-      const amountValue = Number(amountRaw);
-      if (!amountRaw || !Number.isFinite(amountValue)) {
-        amountErrors[index] = "El monto pagado es obligatorio.";
-      } else if (amountValue <= 0) {
-        amountErrors[index] = "El monto pagado debe ser mayor a cero.";
-      } else {
-        const cents = toCents(amountValue);
-        if (
-          installmentAmountCents.length === installmentsCount &&
-          !errors.installmentAmounts &&
-          cents > installmentAmountCents[index]
-        ) {
-          amountErrors[index] = "El monto pagado no puede superar el valor de la cuota.";
-        } else {
-          installmentPaymentAmountCents[index] = cents;
-        }
-      }
+      const rawMethods = (raw.installmentPaymentMethods?.[index] ?? []).map(str);
+      const rawAmounts = (raw.installmentPaymentAmounts?.[index] ?? []).map(str);
+      const rawReceivedByNames = (raw.installmentPaymentReceivedByNames?.[index] ?? []).map(str);
+      const rawNotes = (raw.installmentPaymentNotes?.[index] ?? []).map(str);
+      const rawReceipts = raw.installmentPaymentReceipts?.[index] ?? [];
+      const rawBankAccountIds = (raw.installmentPaymentBankAccountIds?.[index] ?? []).map(str);
 
-      if (methodRaw === PaymentMethod.CASH) {
-        const receivedByName = rawReceivedByNames[index] ?? "";
-        if (!receivedByName) {
-          receivedByNameErrors[index] = "Indica quién recibió el pago.";
-        } else {
-          installmentPaymentReceivedByNames[index] = receivedByName;
+      let validPaymentsSumCents = 0;
+
+      for (let row = 0; row < MAX_PAYMENTS_PER_INSTALLMENT; row += 1) {
+        const methodRaw = rawMethods[row] ?? "";
+        if (!methodRaw) {
+          installmentPaymentMethods[index][row] = null;
+          continue;
         }
-      } else {
-        const receiptEntry = rawReceipts[index];
-        const receiptFile =
-          receiptEntry instanceof File && receiptEntry.size > 0 ? receiptEntry : null;
-        if (!receiptFile) {
-          receiptErrors[index] = "Debes adjuntar el voucher del pago.";
-        } else {
-          const validationError = validateReceiptFile(receiptFile);
-          if (validationError === "type") {
-            receiptErrors[index] = "Solo se permiten archivos PDF, JPG, JPEG, PNG o WEBP.";
-          } else if (validationError === "size") {
-            receiptErrors[index] =
-              `El voucher no debe superar ${Math.floor(MAX_RECEIPT_BYTES / (1024 * 1024))} MB.`;
+        if (!isValidPaymentMethod(methodRaw)) {
+          methodErrors[index][row] = "Selecciona una forma de pago válida.";
+          installmentPaymentMethods[index][row] = null;
+          continue;
+        }
+        installmentPaymentMethods[index][row] = methodRaw;
+
+        // --- Bank account: BANK_TRANSFER/DEPOSIT payments land in whichever
+        // active account the seller picks; CASH never collects one. A cuota
+        // can mix several methods (e.g. part transfer, part cash), and each
+        // BANK_TRANSFER/DEPOSIT row keeps its own account rather than
+        // sharing a single sale-wide one (see Payment.bankAccountId).
+        if (methodRaw === PaymentMethod.BANK_TRANSFER || methodRaw === PaymentMethod.DEPOSIT) {
+          const bankAccountIdRaw = rawBankAccountIds[row] ?? "";
+          if (!bankAccountIdRaw || !isValidUuid(bankAccountIdRaw)) {
+            bankAccountErrors[index][row] = "Selecciona una cuenta bancaria de destino.";
           } else {
-            installmentPaymentReceiptFiles[index] = receiptFile;
+            const paymentBankAccount =
+              await bankAccountRepository.findActiveBankAccountById(bankAccountIdRaw);
+            if (!paymentBankAccount) {
+              bankAccountErrors[index][row] = "Selecciona una cuenta bancaria activa válida.";
+            } else {
+              installmentPaymentBankAccountIds[index][row] = paymentBankAccount.id;
+            }
+          }
+        } else if (methodRaw === PaymentMethod.CARD) {
+          // --- CARD always lands in the one fixed account (Banco Guayaquil)
+          // every card terminal settles into -- the seller never chooses it,
+          // so whatever the form submitted is only ever accepted if it
+          // matches that exact account, never merely "any active account".
+          if (!fixedCardBankAccount) {
+            bankAccountErrors[index][row] =
+              "No hay una cuenta bancaria configurada para pagos con tarjeta. Contacta a un administrador.";
+          } else {
+            const bankAccountIdRaw = rawBankAccountIds[row] ?? "";
+            if (bankAccountIdRaw !== fixedCardBankAccount.id) {
+              bankAccountErrors[index][row] = "La cuenta bancaria de tarjeta no es válida.";
+            } else {
+              installmentPaymentBankAccountIds[index][row] = fixedCardBankAccount.id;
+            }
           }
         }
+
+        const amountRaw = rawAmounts[row] ?? "";
+        const amountValue = Number(amountRaw);
+        if (!amountRaw || !Number.isFinite(amountValue)) {
+          amountErrors[index][row] = "El monto del pago es obligatorio.";
+        } else if (amountValue <= 0) {
+          amountErrors[index][row] = "El monto del pago debe ser mayor a cero.";
+        } else {
+          const cents = toCents(amountValue);
+          installmentPaymentAmountCents[index][row] = cents;
+          validPaymentsSumCents += cents;
+        }
+
+        if (methodRaw === PaymentMethod.CASH) {
+          const receivedByName = rawReceivedByNames[row] ?? "";
+          if (!receivedByName) {
+            receivedByNameErrors[index][row] = "Indica quién recibió el pago.";
+          } else {
+            installmentPaymentReceivedByNames[index][row] = receivedByName;
+          }
+        } else {
+          const receiptEntry = rawReceipts[row];
+          const receiptFile =
+            receiptEntry instanceof File && receiptEntry.size > 0 ? receiptEntry : null;
+          if (!receiptFile) {
+            receiptErrors[index][row] = "Debes adjuntar el voucher del pago.";
+          } else {
+            const validationError = validateReceiptFile(receiptFile);
+            if (validationError === "type") {
+              receiptErrors[index][row] = "Solo se permiten archivos PDF, JPG, JPEG, PNG o WEBP.";
+            } else if (validationError === "size") {
+              receiptErrors[index][row] =
+                `El voucher no debe superar ${Math.floor(MAX_RECEIPT_BYTES / (1024 * 1024))} MB.`;
+            } else {
+              installmentPaymentReceiptFiles[index][row] = receiptFile;
+            }
+          }
+        }
+
+        installmentPaymentNotesValues[index][row] = rawNotes[row] || undefined;
       }
 
-      installmentPaymentNotesValues[index] = rawNotes[index] || undefined;
+      if (
+        installmentAmountCents.length === installmentsCount &&
+        !errors.firstInstallmentAmount &&
+        validPaymentsSumCents > installmentAmountCents[index]
+      ) {
+        totalErrors[index] = "La suma de los pagos supera el monto de la cuota.";
+      }
     }
 
-    if (methodErrors.some((message) => message !== undefined)) {
+    if (methodErrors.some((row) => row.some((message) => message !== undefined))) {
       errors.installmentPaymentMethods = methodErrors;
     }
-    if (amountErrors.some((message) => message !== undefined)) {
+    if (amountErrors.some((row) => row.some((message) => message !== undefined))) {
       errors.installmentPaymentAmounts = amountErrors;
     }
-    if (receivedByNameErrors.some((message) => message !== undefined)) {
+    if (receivedByNameErrors.some((row) => row.some((message) => message !== undefined))) {
       errors.installmentPaymentReceivedByNames = receivedByNameErrors;
     }
-    if (receiptErrors.some((message) => message !== undefined)) {
+    if (receiptErrors.some((row) => row.some((message) => message !== undefined))) {
       errors.installmentPaymentReceipts = receiptErrors;
+    }
+    if (bankAccountErrors.some((row) => row.some((message) => message !== undefined))) {
+      errors.installmentPaymentBankAccountIds = bankAccountErrors;
+    }
+    if (totalErrors.some((message) => message !== undefined)) {
+      errors.installmentPaymentsTotal = totalErrors;
     }
   }
 
-  // --- Receipt: mandatory. An empty file input still arrives as a
-  // zero-byte File with an empty name -- treat that as "no file selected"
-  // and reject it, the same as a missing field entirely. This is the only
-  // check that actually stops a Sale from being created without a
-  // receipt -- the client-side "required" affordance is a UX hint, never
-  // trusted. Type/extension/size are always re-checked here, server-side.
+  // --- Sale-level receipt: optional. The "Nueva venta" flow no longer
+  // requires a general comprobante -- the sale is already backed by each
+  // installment's own payment record (CASH's "Entregado a" or a voucher
+  // for every other method, both validated per-cuota above). Only
+  // validated when actually provided (e.g. a future entry point that still
+  // sends one); a missing/empty file is simply treated as "no receipt".
   const receiptFile = raw.receipt instanceof File && raw.receipt.size > 0 ? raw.receipt : null;
-  if (!receiptFile) {
-    errors.receipt = "Debes adjuntar un comprobante para registrar la venta.";
-  } else {
+  if (receiptFile) {
     const validationError = validateReceiptFile(receiptFile);
     if (validationError === "type") {
       errors.receipt = "Solo se permiten archivos PDF, JPG, JPEG, PNG o WEBP.";
@@ -584,13 +716,11 @@ export async function createSaleForUser(
     Object.keys(errors).length > 0 ||
     !customer ||
     !product ||
-    !bankAccount ||
     !saleDate ||
     !sellerId ||
     !hasValidInstallmentsCount ||
     installmentDueDates.length !== installmentsCount ||
-    installmentAmountCents.length !== installmentsCount ||
-    !receiptFile
+    installmentAmountCents.length !== installmentsCount
   ) {
     return { ok: false, errors };
   }
@@ -612,100 +742,114 @@ export async function createSaleForUser(
   // The file is written to disk once, before the sale is created (its
   // content never depends on the sale outcome) -- on any failure below
   // it's deleted again so a failed registration never leaves an orphaned
-  // file with no Sale/SaleReceipt row.
-  let savedReceipt: Awaited<ReturnType<typeof saveReceiptFile>>;
-  try {
-    savedReceipt = await saveReceiptFile(receiptFile, "sale");
-  } catch (error) {
-    console.error("[sales] Failed to save receipt file:", error);
-    return { ok: false, formError: "No se pudo guardar el comprobante. Intenta nuevamente." };
+  // file with no Sale/SaleReceipt row. Skipped entirely when no sale-level
+  // receipt was provided, since it's no longer required by this flow.
+  let savedReceipt: Awaited<ReturnType<typeof saveReceiptFile>> | null = null;
+  if (receiptFile) {
+    try {
+      savedReceipt = await saveReceiptFile(receiptFile, "sale");
+    } catch (error) {
+      console.error("[sales] Failed to save receipt file:", error);
+      return { ok: false, formError: "No se pudo guardar el comprobante. Intenta nuevamente." };
+    }
   }
 
   // Same "save to disk once, up front" treatment as the sale's own receipt
   // above -- each voucher's content never depends on the sale/transaction
   // outcome, and on any failure below every already-saved voucher is
   // deleted again so a failed registration never leaves an orphaned file
-  // with no Payment/PaymentReceipt row. One entry per installment index,
-  // null wherever that cuota has no method (or is CASH, which never
-  // collects a voucher).
-  const savedInstallmentReceipts: (Awaited<ReturnType<typeof saveReceiptFile>> | null)[] = [];
+  // with no Payment/PaymentReceipt row. 2D, mirroring
+  // installmentPaymentReceiptFiles above -- null wherever that payment row
+  // has no method, is CASH (never collects a voucher), or doesn't exist.
+  const savedInstallmentReceipts: (Awaited<ReturnType<typeof saveReceiptFile>> | null)[][] = [];
   for (let index = 0; index < installmentsCount; index += 1) {
-    const file = installmentPaymentReceiptFiles[index];
-    if (!file) {
-      savedInstallmentReceipts[index] = null;
-      continue;
-    }
-    try {
-      savedInstallmentReceipts[index] = await saveReceiptFile(file, "payment");
-    } catch (error) {
-      console.error("[sales] Failed to save cuota payment voucher file:", error);
-      await deleteReceiptFile(savedReceipt.fileUrl, "sale");
-      for (const saved of savedInstallmentReceipts) {
-        if (saved) await deleteReceiptFile(saved.fileUrl, "payment");
+    savedInstallmentReceipts[index] = [];
+    for (let row = 0; row < MAX_PAYMENTS_PER_INSTALLMENT; row += 1) {
+      const file = installmentPaymentReceiptFiles[index]?.[row];
+      if (!file) {
+        savedInstallmentReceipts[index][row] = null;
+        continue;
       }
-      return {
-        ok: false,
-        formError: "No se pudo guardar el voucher de una de las cuotas. Intenta nuevamente.",
-      };
+      try {
+        savedInstallmentReceipts[index][row] = await saveReceiptFile(file, "payment");
+      } catch (error) {
+        console.error("[sales] Failed to save cuota payment voucher file:", error);
+        if (savedReceipt) await deleteReceiptFile(savedReceipt.fileUrl, "sale");
+        for (const rowReceipts of savedInstallmentReceipts) {
+          for (const saved of rowReceipts) {
+            if (saved) await deleteReceiptFile(saved.fileUrl, "payment");
+          }
+        }
+        return {
+          ok: false,
+          formError: "No se pudo guardar el voucher de uno de los pagos. Intenta nuevamente.",
+        };
+      }
     }
   }
 
-  const installmentPayments = installmentPaymentMethods
-    .map((method, index) => {
-      if (!method) return null;
-      const savedReceiptForIndex = savedInstallmentReceipts[index];
-      return {
-        installmentNumber: index + 1,
-        amount: centsToDecimalString(installmentPaymentAmountCents[index]),
-        paymentDate: saleDate,
-        method,
-        notes: installmentPaymentNotesValues[index],
-        receivedByName: installmentPaymentReceivedByNames[index],
-        registeredById: user.id,
-        receipt: savedReceiptForIndex
-          ? {
-              fileUrl: savedReceiptForIndex.fileUrl,
-              fileName: savedReceiptForIndex.fileName,
-              fileType: savedReceiptForIndex.fileType,
-              uploadedById: user.id,
-            }
-          : undefined,
-      };
-    })
-    .filter((payment): payment is NonNullable<typeof payment> => payment !== null);
+  const installmentPayments = installmentPaymentMethods.flatMap((methodsForInstallment, index) =>
+    methodsForInstallment
+      .map((method, row) => {
+        if (!method) return null;
+        const savedReceiptForRow = savedInstallmentReceipts[index]?.[row];
+        return {
+          installmentNumber: index + 1,
+          amount: centsToDecimalString(installmentPaymentAmountCents[index][row]!),
+          paymentDate: saleDate,
+          method,
+          notes: installmentPaymentNotesValues[index][row],
+          receivedByName: installmentPaymentReceivedByNames[index][row],
+          bankAccountId: installmentPaymentBankAccountIds[index]?.[row],
+          registeredById: user.id,
+          receipt: savedReceiptForRow
+            ? {
+                fileUrl: savedReceiptForRow.fileUrl,
+                fileName: savedReceiptForRow.fileName,
+                fileType: savedReceiptForRow.fileType,
+                uploadedById: user.id,
+              }
+            : undefined,
+        };
+      })
+      .filter((payment): payment is NonNullable<typeof payment> => payment !== null),
+  );
 
   try {
-    // Sale + Installments + SaleReceipt (+ one Payment/PaymentReceipt per
-    // cuota that already had a forma de pago selected) are created
-    // together in one Prisma transaction (see
-    // sale-repository.createSaleWithInstallments) -- a sale can never exist
-    // without its installments or its receipt, or vice versa, and it can
-    // never report success while "missing" a cuota payment it was asked to
-    // record.
+    // Sale + Installments (+ SaleReceipt, only when a sale-level receipt
+    // was actually provided) (+ one Payment/PaymentReceipt per cuota that
+    // already had a forma de pago selected) are created together in one
+    // Prisma transaction (see sale-repository.createSaleWithInstallments)
+    // -- a sale can never exist without its installments, or with a
+    // partially-created receipt, and it can never report success while
+    // "missing" a cuota payment it was asked to record.
     const sale = await saleRepository.createSaleWithInstallments({
       customerId: customer.id,
       sellerId,
       productId: product.id,
-      bankAccountId: bankAccount.id,
       saleDate,
       originalPrice: centsToDecimalString(originalPriceCents),
       discount: centsToDecimalString(discountCents),
       finalPrice: centsToDecimalString(finalPriceCents),
       installments,
-      receipt: {
-        fileUrl: savedReceipt.fileUrl,
-        fileName: savedReceipt.fileName,
-        fileType: savedReceipt.fileType,
-        uploadedById: user.id,
-      },
+      receipt: savedReceipt
+        ? {
+            fileUrl: savedReceipt.fileUrl,
+            fileName: savedReceipt.fileName,
+            fileType: savedReceipt.fileType,
+            uploadedById: user.id,
+          }
+        : undefined,
       installmentPayments,
     });
     return { ok: true, id: sale.id };
   } catch (error) {
     console.error("[sales] Failed to create sale:", error);
-    await deleteReceiptFile(savedReceipt.fileUrl, "sale");
-    for (const saved of savedInstallmentReceipts) {
-      if (saved) await deleteReceiptFile(saved.fileUrl, "payment");
+    if (savedReceipt) await deleteReceiptFile(savedReceipt.fileUrl, "sale");
+    for (const rowReceipts of savedInstallmentReceipts) {
+      for (const saved of rowReceipts) {
+        if (saved) await deleteReceiptFile(saved.fileUrl, "payment");
+      }
     }
     return { ok: false, formError: "No se pudo crear la venta. Intenta nuevamente." };
   }
