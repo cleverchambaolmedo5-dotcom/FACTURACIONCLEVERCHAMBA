@@ -1,8 +1,10 @@
 "use client";
 
-import { useActionState } from "react";
+import Link from "next/link";
+import { useActionState, useRef, useState } from "react";
 import { UserRole } from "@/generated/prisma/enums";
 import type { CustomerFormState } from "@/app/(app)/clientes/actions";
+import type { CustomerDuplicateCandidate } from "@/server/services/customer-service";
 
 export type CustomerFormAction = (
   state: CustomerFormState,
@@ -58,10 +60,25 @@ export function CustomerForm({
   );
   const errors = state && !state.ok ? state.errors : undefined;
   const formError = state && !state.ok ? state.formError : undefined;
+  const duplicate = state && !state.ok ? state.duplicate : undefined;
   const canPickSeller = role !== UserRole.SELLER;
 
+  const formRef = useRef<HTMLFormElement>(null);
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false);
+
+  function handleContinueAnyway() {
+    setConfirmDuplicate(true);
+    // Set synchronously via the DOM too -- the state update above won't
+    // have re-rendered the hidden input's value yet when requestSubmit()
+    // reads the form.
+    const input = formRef.current?.elements.namedItem("confirmDuplicate");
+    if (input instanceof HTMLInputElement) input.value = "true";
+    formRef.current?.requestSubmit();
+  }
+
   return (
-    <form action={formAction} className="max-w-xl space-y-4" noValidate>
+    <form ref={formRef} action={formAction} className="max-w-xl space-y-4" noValidate>
+      <input type="hidden" name="confirmDuplicate" value={confirmDuplicate ? "true" : "false"} />
       <div className="space-y-1">
         <label htmlFor="fullName" className="text-sm font-medium text-foreground">
           Nombre completo
@@ -185,6 +202,30 @@ export function CustomerForm({
 
       {formError && <p className="text-sm text-error">{formError}</p>}
 
+      {duplicate?.kind === "blocked" && (
+        <div className="space-y-3 rounded-md border border-error/40 bg-error/5 p-3">
+          <DuplicateCandidateCard customer={duplicate.customer} />
+        </div>
+      )}
+
+      {duplicate?.kind === "warning" && (
+        <div className="space-y-3 rounded-md border border-border bg-black/[0.02] p-3">
+          <div className="space-y-2">
+            {duplicate.customers.map((customer) => (
+              <DuplicateCandidateCard key={customer.id} customer={customer} />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={handleContinueAnyway}
+            disabled={pending}
+            className="text-sm font-medium text-primary hover:underline disabled:opacity-60"
+          >
+            Continuar con nuevo cliente de todos modos
+          </button>
+        </div>
+      )}
+
       <button
         type="submit"
         disabled={pending}
@@ -193,5 +234,26 @@ export function CustomerForm({
         {pending ? "Guardando…" : submitLabel}
       </button>
     </form>
+  );
+}
+
+function DuplicateCandidateCard({ customer }: { customer: CustomerDuplicateCandidate }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-foreground">{customer.fullName}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {customer.identification ? `${customer.identification} · ` : ""}
+          {customer.phone}
+          {customer.email ? ` · ${customer.email}` : ""}
+        </p>
+      </div>
+      <Link
+        href={`/clientes/${customer.id}/editar`}
+        className="shrink-0 text-sm font-medium text-primary hover:underline"
+      >
+        Ver cliente
+      </Link>
+    </div>
   );
 }

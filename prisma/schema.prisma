@@ -164,10 +164,28 @@ model Customer {
   id             String   @id @default(uuid()) @db.Uuid
   fullName       String
   // Optional -- not every customer has a cédula/RUC on hand at the time of
-  // registration. Still unique when present: Postgres allows any number of
-  // NULLs alongside a unique constraint, so existing customers with a
-  // cédula are never affected.
-  identification String?  @unique
+  // registration. NOT plain-unique: a bare unique constraint on this
+  // column would represent "no two customers may ever share a cédula",
+  // which isn't the actual business rule (see below). Duplicate
+  // detection instead uses two partial, expression-based unique indexes
+  // that Prisma's schema DSL can't declare (it has no support for
+  // functional/expression indexes), so they exist ONLY in
+  // prisma/migrations/20260910194546_customer_duplicate_protection/migration.sql,
+  // not here:
+  //   - customer_name_identification_unique: normalized(fullName) +
+  //     normalized(identification), only WHERE identification IS NOT
+  //     NULL. Enforces "same person" = same name + same cédula.
+  //   - customer_name_phone_unique: normalized(fullName) +
+  //     ecuador-normalized(phone), only WHERE identification IS NULL.
+  //     Enforces the same for customers who never provided a cédula.
+  // Both indexes use the SQL helper functions defined in that same
+  // migration (customer_normalize_name/_identification/_ec_phone),
+  // which src/server/repositories/customer-repository.ts also calls
+  // directly so the application-level pre-check and the DB constraint
+  // can never disagree. See src/lib/customer-normalize.ts for the
+  // equivalent (and equally load-bearing) JS-side normalization used
+  // before a value ever reaches a query.
+  identification String?
   phone          String
   email          String?
   city           String?

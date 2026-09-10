@@ -32,6 +32,7 @@ export async function createCustomerAction(
     country: formData.get("country"),
     address: formData.get("address"),
     assignedSellerId: formData.get("assignedSellerId"),
+    confirmDuplicate: formData.get("confirmDuplicate"),
   });
 
   if (!result.ok) {
@@ -73,6 +74,7 @@ export async function updateCustomerAction(
     country: formData.get("country"),
     address: formData.get("address"),
     assignedSellerId: formData.get("assignedSellerId"),
+    confirmDuplicate: formData.get("confirmDuplicate"),
   });
 
   if (!result.ok) {

@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { UserRole } from "@/generated/prisma/enums";
 import type { CustomerFormState } from "@/app/(app)/clientes/actions";
+import type { CustomerDuplicateCandidate } from "@/server/services/customer-service";
 
 export type NewCustomerAction = (
   state: CustomerFormState,
@@ -58,7 +59,27 @@ export function CustomerCreateModal({
   const [identification, setIdentification] = useState("");
   const errors = state && !state.ok ? state.errors : undefined;
   const formError = state && !state.ok ? state.formError : undefined;
+  const duplicate = state && !state.ok ? state.duplicate : undefined;
   const canPickSeller = role !== UserRole.SELLER;
+
+  const formRef = useRef<HTMLFormElement>(null);
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false);
+
+  function handleContinueAnyway() {
+    setConfirmDuplicate(true);
+    const input = formRef.current?.elements.namedItem("confirmDuplicate");
+    if (input instanceof HTMLInputElement) input.value = "true";
+    formRef.current?.requestSubmit();
+  }
+
+  function handleUseExisting(customer: CustomerDuplicateCandidate) {
+    onCreated({
+      id: customer.id,
+      fullName: customer.fullName,
+      phone: customer.phone,
+      identification: customer.identification,
+    });
+  }
 
   useEffect(() => {
     if (state?.ok) {
@@ -96,6 +117,7 @@ export function CustomerCreateModal({
         </div>
 
         <form
+          ref={formRef}
           action={formAction}
           // Rendered via a portal, but still a React-tree descendant of the
           // "Nueva venta" <form> -- its submit event bubbles through that
@@ -106,6 +128,7 @@ export function CustomerCreateModal({
           className="space-y-4"
           noValidate
         >
+          <input type="hidden" name="confirmDuplicate" value={confirmDuplicate ? "true" : "false"} />
           <div className="space-y-1">
             <label htmlFor="modal-fullName" className="text-sm font-medium text-foreground">
               Nombre completo
@@ -228,6 +251,30 @@ export function CustomerCreateModal({
 
           {formError && <p className="text-sm text-error">{formError}</p>}
 
+          {duplicate?.kind === "blocked" && (
+            <div className="space-y-2 rounded-md border border-error/40 bg-error/5 p-3">
+              <DuplicateCandidateRow customer={duplicate.customer} onUse={handleUseExisting} />
+            </div>
+          )}
+
+          {duplicate?.kind === "warning" && (
+            <div className="space-y-3 rounded-md border border-border bg-black/[0.02] p-3">
+              <div className="space-y-2">
+                {duplicate.customers.map((customer) => (
+                  <DuplicateCandidateRow key={customer.id} customer={customer} onUse={handleUseExisting} />
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={handleContinueAnyway}
+                disabled={pending}
+                className="text-sm font-medium text-primary hover:underline disabled:opacity-60"
+              >
+                Continuar con nuevo cliente de todos modos
+              </button>
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
@@ -249,5 +296,33 @@ export function CustomerCreateModal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+function DuplicateCandidateRow({
+  customer,
+  onUse,
+}: {
+  customer: CustomerDuplicateCandidate;
+  onUse: (customer: CustomerDuplicateCandidate) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-foreground">{customer.fullName}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {customer.identification ? `${customer.identification} · ` : ""}
+          {customer.phone}
+          {customer.email ? ` · ${customer.email}` : ""}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => onUse(customer)}
+        className="shrink-0 text-sm font-medium text-primary hover:underline"
+      >
+        Usar cliente existente
+      </button>
+    </div>
   );
 }

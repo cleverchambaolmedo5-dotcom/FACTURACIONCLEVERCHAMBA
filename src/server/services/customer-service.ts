@@ -2,7 +2,13 @@ import "server-only";
 import { UserRole } from "@/generated/prisma/enums";
 import type { PublicUser } from "@/lib/auth/session";
 import { isValidEmail, isValidUuid } from "@/lib/validation";
+import {
+  normalizeCustomerIdentification,
+  normalizeCustomerName,
+  normalizeCustomerPhone,
+} from "@/lib/customer-normalize";
 import * as customerRepository from "@/server/repositories/customer-repository";
+import type { CustomerDuplicateCandidate } from "@/server/repositories/customer-repository";
 
 // All Customer permission logic lives here, not in pages/components/
 // actions. Every function takes the authenticated `user` and enforces:
@@ -16,9 +22,20 @@ export type CustomerFieldErrors = Partial<
   Record<"fullName" | "identification" | "phone" | "email" | "country" | "assignedSellerId", string>
 >;
 
+export type { CustomerDuplicateCandidate } from "@/server/repositories/customer-repository";
+
+// "blocked": the primary rule (NOMBRE+CÉDULA when there's an
+// identification, NOMBRE+TELÉFONO otherwise) matched an existing
+// customer -- the save is refused. "warning": only a secondary signal
+// (shared phone or email) matched -- advisory only, see
+// findDuplicateForCustomer below.
+export type CustomerDuplicateInfo =
+  | { kind: "blocked"; customer: CustomerDuplicateCandidate }
+  | { kind: "warning"; customers: CustomerDuplicateCandidate[] };
+
 export type CustomerActionResult =
   | { ok: true; id: string }
-  | { ok: false; errors?: CustomerFieldErrors; formError?: string };
+  | { ok: false; errors?: CustomerFieldErrors; formError?: string; duplicate?: CustomerDuplicateInfo };
 
 export type RawCustomerInput = {
   fullName?: FormDataEntryValue | null;
@@ -29,6 +46,11 @@ export type RawCustomerInput = {
   // Optional -- see Customer.address in schema.prisma.
   address?: FormDataEntryValue | null;
   assignedSellerId?: FormDataEntryValue | null;
+  // Set by the client after the user has seen a *warning* (never a
+  // block) and chosen "Continuar con nuevo cliente" -- see
+  // findDuplicateForCustomer. Re-submitting with this set skips the
+  // advisory check but never bypasses the primary blocking rule.
+  confirmDuplicate?: FormDataEntryValue | null;
 };
 
 function str(value: FormDataEntryValue | null | undefined): string {
@@ -121,13 +143,108 @@ async function resolveAssignedSellerId(
   return { assignedSellerId: seller.id };
 }
 
-function isUniqueIdentificationError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "P2002"
-  );
+function isConfirmedDuplicate(raw: RawCustomerInput): boolean {
+  return str(raw.confirmDuplicate) === "true";
+}
+
+/**
+ * Duplicate-detection rule (see project instructions for the full spec):
+ *   - Identification present  -> block on NOMBRE + CÉDULA.
+ *   - Identification absent   -> block on NOMBRE + TELÉFONO, but only
+ *     against other customers that also lack an identification (see
+ *     findCustomerByNameAndPhone) -- matching an existing customer that
+ *     does have one is an allowed combination.
+ *   - Otherwise, a shared phone or email is only ever a non-blocking
+ *     warning -- it never becomes an independent block.
+ * `excludeId` leaves a customer's own record out of the comparison, so
+ * editing it without changing name/cédula/teléfono never flags itself.
+ */
+async function findDuplicateForCustomer(
+  input: { fullName: string; identification: string; phone: string; email: string },
+  excludeId?: string,
+): Promise<{ kind: "none" } | CustomerDuplicateInfo> {
+  const normalizedName = normalizeCustomerName(input.fullName);
+  const normalizedPhone = normalizeCustomerPhone(input.phone);
+
+  if (input.identification) {
+    const blocked = await customerRepository.findCustomerByNameAndIdentification({
+      normalizedName,
+      normalizedIdentification: normalizeCustomerIdentification(input.identification),
+      excludeId,
+    });
+    if (blocked) return { kind: "blocked", customer: blocked };
+  } else {
+    const blocked = await customerRepository.findCustomerByNameAndPhone({
+      normalizedName,
+      normalizedPhone,
+      excludeId,
+    });
+    if (blocked) return { kind: "blocked", customer: blocked };
+  }
+
+  const similar = await customerRepository.findSimilarCustomers({
+    normalizedPhone,
+    email: input.email || null,
+    excludeId,
+  });
+  if (similar.length > 0) return { kind: "warning", customers: similar };
+
+  return { kind: "none" };
+}
+
+const CUSTOMER_NAME_IDENTIFICATION_UNIQUE = "customer_name_identification_unique";
+const CUSTOMER_NAME_PHONE_UNIQUE = "customer_name_phone_unique";
+
+/**
+ * Extracts the name of the Postgres index/constraint a P2002 came from.
+ * The two duplicate-protection indexes (see
+ * prisma/migrations/20260910194546_customer_duplicate_protection) aren't
+ * declared in schema.prisma (Prisma can't express expression indexes), so
+ * Prisma can't resolve `error.meta.target` to column names for them the
+ * way it does for schema-declared unique fields -- the driver adapter's
+ * raw Postgres error (which does carry the index name) is the only place
+ * to read it from. Verified empirically against a real violation of each
+ * index; returns null for anything else (including a non-P2002 error) so
+ * callers always have a safe fallback.
+ */
+function getViolatedUniqueIndex(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  if ((error as { code?: unknown }).code !== "P2002") return null;
+
+  const meta = (error as { meta?: unknown }).meta;
+  const driverAdapterError = meta && typeof meta === "object" ? (meta as { driverAdapterError?: unknown }).driverAdapterError : undefined;
+  const cause = driverAdapterError && typeof driverAdapterError === "object" ? (driverAdapterError as { cause?: unknown }).cause : undefined;
+  const constraint = cause && typeof cause === "object" ? (cause as { constraint?: unknown }).constraint : undefined;
+  const index = constraint && typeof constraint === "object" ? (constraint as { index?: unknown }).index : undefined;
+
+  return typeof index === "string" ? index : null;
+}
+
+/**
+ * Translates a P2002 that survived the pre-check (a race: another request
+ * inserted/updated a colliding customer between our SELECT and this
+ * INSERT/UPDATE) into the same friendly, non-technical result the
+ * pre-check itself returns -- re-running the duplicate lookup so the
+ * response still carries the conflicting customer's info for the UI.
+ * Returns null for a P2002 on anything else (or a non-P2002 error), so
+ * the caller falls back to its generic error message.
+ */
+async function handleUniqueConstraintRace(
+  error: unknown,
+  input: { fullName: string; identification: string; phone: string; email: string },
+  excludeId?: string,
+): Promise<CustomerActionResult | null> {
+  const index = getViolatedUniqueIndex(error);
+  if (index !== CUSTOMER_NAME_IDENTIFICATION_UNIQUE && index !== CUSTOMER_NAME_PHONE_UNIQUE) {
+    return null;
+  }
+
+  const duplicate = await findDuplicateForCustomer(input, excludeId);
+  return {
+    ok: false,
+    formError: "Este cliente ya está registrado.",
+    ...(duplicate.kind === "blocked" ? { duplicate } : {}),
+  };
 }
 
 export async function createCustomerForUser(
@@ -146,6 +263,18 @@ export async function createCustomerForUser(
     return { ok: false, errors };
   }
 
+  const duplicate = await findDuplicateForCustomer({ fullName, identification, phone, email });
+  if (duplicate.kind === "blocked") {
+    return { ok: false, formError: "Este cliente ya está registrado.", duplicate };
+  }
+  if (duplicate.kind === "warning" && !isConfirmedDuplicate(raw)) {
+    return {
+      ok: false,
+      formError: "Encontramos un cliente con datos similares.",
+      duplicate,
+    };
+  }
+
   try {
     const customer = await customerRepository.createCustomer({
       fullName,
@@ -158,12 +287,9 @@ export async function createCustomerForUser(
     });
     return { ok: true, id: customer.id };
   } catch (error) {
-    if (isUniqueIdentificationError(error)) {
-      return {
-        ok: false,
-        errors: { identification: "Ya existe un cliente con esa identificación." },
-      };
-    }
+    const raceResult = await handleUniqueConstraintRace(error, { fullName, identification, phone, email });
+    if (raceResult) return raceResult;
+
     console.error("[customers] Failed to create customer:", error);
     return { ok: false, formError: "No se pudo crear el cliente. Intenta nuevamente." };
   }
@@ -258,6 +384,21 @@ export async function updateCustomerForUser(
     return { ok: false, errors };
   }
 
+  const duplicate = await findDuplicateForCustomer(
+    { fullName, identification, phone, email },
+    existing.id,
+  );
+  if (duplicate.kind === "blocked") {
+    return { ok: false, formError: "Este cliente ya está registrado.", duplicate };
+  }
+  if (duplicate.kind === "warning" && !isConfirmedDuplicate(raw)) {
+    return {
+      ok: false,
+      formError: "Encontramos un cliente con datos similares.",
+      duplicate,
+    };
+  }
+
   try {
     await customerRepository.updateCustomer(id, {
       fullName,
@@ -272,12 +413,13 @@ export async function updateCustomerForUser(
     });
     return { ok: true, id };
   } catch (error) {
-    if (isUniqueIdentificationError(error)) {
-      return {
-        ok: false,
-        errors: { identification: "Ya existe un cliente con esa identificación." },
-      };
-    }
+    const raceResult = await handleUniqueConstraintRace(
+      error,
+      { fullName, identification, phone, email },
+      existing.id,
+    );
+    if (raceResult) return raceResult;
+
     console.error("[customers] Failed to update customer:", error);
     return { ok: false, formError: "No se pudo actualizar el cliente. Intenta nuevamente." };
   }
