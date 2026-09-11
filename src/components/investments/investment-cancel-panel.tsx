@@ -36,7 +36,7 @@ export function InvestmentCancelPanel({ investmentId }: { investmentId: string }
 
   if (!confirmOpen) {
     return (
-      <div className="rounded-lg border border-error/30 bg-error/5 p-4">
+      <div className="rounded-lg border border-error/30 bg-error-soft p-4">
         <h4 className="text-sm font-semibold text-foreground">Cancelación anticipada</h4>
         <p className="mt-1 text-xs text-muted-foreground">
           Cancela esta inversión antes de su vencimiento. Requiere un motivo obligatorio.
@@ -44,7 +44,7 @@ export function InvestmentCancelPanel({ investmentId }: { investmentId: string }
         <button
           type="button"
           onClick={() => setConfirmOpen(true)}
-          className="mt-3 rounded-md border border-error px-4 py-2 text-sm font-medium text-error transition-colors hover:bg-error/10"
+          className="mt-3 rounded-md border border-error px-4 py-2 text-sm font-medium text-error transition-colors hover:bg-error-soft"
         >
           Cancelar inversión
         </button>
@@ -55,7 +55,7 @@ export function InvestmentCancelPanel({ investmentId }: { investmentId: string }
   return (
     <form
       action={formAction}
-      className="space-y-3 rounded-lg border border-error/30 bg-error/5 p-4"
+      className="space-y-3 rounded-lg border border-error/30 bg-error-soft p-4"
     >
       <h4 className="text-sm font-semibold text-foreground">Confirmar cancelación anticipada</h4>
 

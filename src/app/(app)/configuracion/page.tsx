@@ -29,7 +29,7 @@ export default async function ConfiguracionPage() {
   return (
     <div className="flex flex-1 flex-col gap-8">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Configuración</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">Configuración</h2>
         <p className="text-sm text-muted-foreground">
           Gestiona las preferencias generales del sistema.
         </p>

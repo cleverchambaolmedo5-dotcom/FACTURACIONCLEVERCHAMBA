@@ -11,6 +11,7 @@ import { BankAccountSearch } from "@/components/bank-accounts/bank-account-searc
 import { BankAccountFilters } from "@/components/bank-accounts/bank-account-filters";
 import { BankAccountTable } from "@/components/bank-accounts/bank-account-table";
 import { BankAccountEmptyState } from "@/components/bank-accounts/bank-account-empty-state";
+import { buttonVariants } from "@/components/ui/button";
 import { siteConfig } from "@/config/site";
 
 export const metadata: Metadata = { title: `Cuentas bancarias · ${siteConfig.name}` };
@@ -45,24 +46,18 @@ export default async function CuentasBancariasPage({
     <div className="flex flex-1 flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Cuentas bancarias</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Cuentas bancarias</h2>
           <p className="text-sm text-muted-foreground">
             Cuentas bancarias utilizadas para recibir pagos.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/cuentas-bancarias/movimientos"
-            className="inline-flex items-center justify-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-black/[0.02]"
-          >
+          <Link href="/cuentas-bancarias/movimientos" className={buttonVariants({ variant: "secondary" })}>
             <ArrowLeftRight className="size-4" aria-hidden />
             Movimientos
           </Link>
           {canCreate && (
-            <Link
-              href="/cuentas-bancarias/nuevo"
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark"
-            >
+            <Link href="/cuentas-bancarias/nuevo" className={buttonVariants()}>
               <Plus className="size-4" aria-hidden />
               Nueva cuenta bancaria
             </Link>

@@ -6,6 +6,10 @@ import type { ModuleContext, ModuleKey } from "@/config/navigation";
 import { cn } from "@/lib/utils";
 import { NavList } from "./nav-list";
 
+const brandWords = siteConfig.brandName.split(" ");
+const brandSubtitle = brandWords.pop() ?? "";
+const brandTitle = brandWords.join(" ");
+
 // Off-canvas navigation for small screens. Reuses NavList (same active
 // state, same permission filtering) instead of duplicating the menu.
 export function MobileNavigation({
@@ -42,19 +46,22 @@ export function MobileNavigation({
         )}
       >
         <div className="flex h-16 items-center justify-between gap-2 border-b border-sidebar-border px-4">
-          <div className="flex items-center gap-2">
-            <div className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Building2 className="size-5" aria-hidden />
             </div>
-            <span className="text-sm font-semibold text-sidebar-foreground">
-              {siteConfig.brandName}
-            </span>
+            <div className="min-w-0 leading-tight">
+              <p className="truncate text-sm font-semibold text-sidebar-foreground">{brandTitle}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-sidebar-foreground/50">
+                {brandSubtitle}
+              </p>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Cerrar navegación"
-            className="flex size-8 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            className="flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
           >
             <X className="size-5" aria-hidden />
           </button>

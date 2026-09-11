@@ -29,7 +29,7 @@ export default async function EditarProductoPage({
   return (
     <div className="flex flex-1 flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Editar producto</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">Editar producto</h2>
         <p className="text-sm text-muted-foreground">{product.name}</p>
       </div>
 

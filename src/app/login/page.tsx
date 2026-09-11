@@ -39,7 +39,7 @@ export default async function LoginPage({
 
   return (
     <div
-      className={`${poppins.variable} flex min-h-screen flex-1 items-center justify-center bg-gradient-to-br from-[#2563eb] via-[#1d4ed8] to-[#0f172a] px-4 py-16`}
+      className={`${poppins.variable} flex min-h-screen flex-1 items-center justify-center bg-gradient-to-br from-primary via-primary-dark to-foreground px-4 py-16`}
       style={{ fontFamily: "var(--font-login-poppins)" }}
     >
       <div className="w-full max-w-sm space-y-6">
@@ -56,10 +56,10 @@ export default async function LoginPage({
             <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-blue-500/30">
               <Building2 className="size-7" aria-hidden />
             </div>
-            <h1 className="text-xl font-semibold tracking-tight text-[#1e293b]">
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">
               {siteConfig.brandName}
             </h1>
-            <p className="mt-1.5 text-sm text-[#64748b]">
+            <p className="mt-1.5 text-sm text-muted-foreground">
               {selectedModule
                 ? `Ingresa al módulo de ${selectedModule.title}. Ingresa con tu correo y contraseña.`
                 : "Ingresa con tu correo y contraseña."}

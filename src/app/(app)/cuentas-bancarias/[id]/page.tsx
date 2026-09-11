@@ -11,6 +11,10 @@ import {
 import { BankAccountStatusBadge } from "@/components/bank-accounts/bank-account-status-badge";
 import { BankTransactionFilters } from "@/components/bank-accounts/bank-transaction-filters";
 import { ExportExcelLink } from "@/components/ui/export-excel-link";
+import { buttonVariants } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { siteConfig } from "@/config/site";
 
 export const metadata: Metadata = { title: `Detalle de cuenta bancaria · ${siteConfig.name}` };
@@ -68,7 +72,7 @@ export default async function CuentaBancariaDetallePage({
     <div className="flex flex-1 flex-col gap-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">{account.bankName}</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">{account.bankName}</h2>
           <p className="text-sm text-muted-foreground">
             {account.alias} · {maskAccountNumber(account.accountNumber)}
           </p>
@@ -78,7 +82,7 @@ export default async function CuentaBancariaDetallePage({
           {canManage && (
             <Link
               href={`/cuentas-bancarias/${account.id}/editar`}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-black/[0.02]"
+              className={buttonVariants({ variant: "secondary", size: "sm" })}
             >
               <Pencil className="size-3.5" aria-hidden />
               Editar
@@ -87,7 +91,7 @@ export default async function CuentaBancariaDetallePage({
         </div>
       </div>
 
-      <div className="grid gap-4 rounded-lg border border-border bg-surface p-6 sm:grid-cols-3">
+      <Card padding="lg" className="grid gap-4 sm:grid-cols-3">
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Titular</dt>
           <dd className="text-sm text-foreground">{account.accountHolder}</dd>
@@ -110,7 +114,7 @@ export default async function CuentaBancariaDetallePage({
             {currencyFormatter.format(Number(account.balance))}
           </dd>
         </div>
-      </div>
+      </Card>
 
       <div className="space-y-3">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -132,59 +136,49 @@ export default async function CuentaBancariaDetallePage({
         </form>
 
         {transactions.length === 0 ? (
-          <p className="rounded-lg border border-border bg-black/[0.02] px-4 py-3 text-sm text-muted-foreground">
+          <p className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
             {hasFilters
               ? "No se encontraron movimientos con los filtros seleccionados."
               : "Esta cuenta todavía no tiene movimientos registrados."}
           </p>
         ) : (
-          <div className="overflow-hidden rounded-lg border border-border bg-surface">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-left text-sm">
-                <thead>
-                  <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <th scope="col" className="px-4 py-3">Fecha</th>
-                    <th scope="col" className="px-4 py-3">Descripción</th>
-                    <th scope="col" className="px-4 py-3">Tipo</th>
-                    <th scope="col" className="px-4 py-3 text-right">Monto</th>
-                    <th scope="col" className="px-4 py-3 text-right">Saldo</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {transactions.map((transaction) => {
-                    const isIncome = transaction.type === "INCOME";
-                    return (
-                      <tr key={transaction.id} className="hover:bg-black/[0.02]">
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {dateFormatter.format(transaction.createdAt)}
-                        </td>
-                        <td className="px-4 py-3 text-foreground">
-                          {transaction.description ??
-                            (transaction.sale
-                              ? `${transaction.sale.customer.fullName} · ${transaction.sale.product.name}`
-                              : "—")}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {isIncome ? "Ingreso" : "Egreso"}
-                        </td>
-                        <td
-                          className={`px-4 py-3 text-right font-medium ${
-                            isIncome ? "text-success" : "text-error"
-                          }`}
-                        >
-                          {isIncome ? "+" : "-"}
-                          {currencyFormatter.format(Number(transaction.amount))}
-                        </td>
-                        <td className="px-4 py-3 text-right font-semibold text-foreground">
-                          {currencyFormatter.format(transaction.balanceAfterCents / 100)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <Table className="min-w-[640px]">
+            <TableHeader>
+              <tr>
+                <TableHead>Fecha</TableHead>
+                <TableHead>Descripción</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead className="text-right">Monto</TableHead>
+                <TableHead className="text-right">Saldo</TableHead>
+              </tr>
+            </TableHeader>
+            <TableBody>
+              {transactions.map((transaction) => {
+                const isIncome = transaction.type === "INCOME";
+                return (
+                  <TableRow key={transaction.id}>
+                    <TableCell className="text-muted-foreground">
+                      {dateFormatter.format(transaction.createdAt)}
+                    </TableCell>
+                    <TableCell>
+                      {transaction.description ??
+                        (transaction.sale
+                          ? `${transaction.sale.customer.fullName} · ${transaction.sale.product.name}`
+                          : "—")}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{isIncome ? "Ingreso" : "Egreso"}</TableCell>
+                    <TableCell className={cn("text-right font-medium", isIncome ? "text-success" : "text-error")}>
+                      {isIncome ? "+" : "-"}
+                      {currencyFormatter.format(Number(transaction.amount))}
+                    </TableCell>
+                    <TableCell className="text-right font-semibold text-foreground">
+                      {currencyFormatter.format(transaction.balanceAfterCents / 100)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         )}
       </div>
     </div>

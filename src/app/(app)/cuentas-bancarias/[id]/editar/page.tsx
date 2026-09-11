@@ -33,7 +33,7 @@ export default async function EditarCuentaBancariaPage({
   return (
     <div className="flex flex-1 flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Editar cuenta bancaria</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">Editar cuenta bancaria</h2>
         <p className="text-sm text-muted-foreground">
           {bankAccount.bankName} · {bankAccount.alias}
         </p>

@@ -3,6 +3,7 @@ import { PaymentMethod, PaymentValidationStatus, UserRole } from "@/generated/pr
 import type { Prisma } from "@/generated/prisma/client";
 import { ValidationStatusBadge } from "@/components/payments/validation-status-badge";
 import { ReceiptLink } from "@/components/payments/receipt-link";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 
 const dateFormatter = new Intl.DateTimeFormat("es-EC", { dateStyle: "medium", timeZone: "UTC" });
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
@@ -57,62 +58,58 @@ export function PaymentHistory({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1000px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <th scope="col" className="px-4 py-3">Fecha</th>
-              <th scope="col" className="px-4 py-3">Monto</th>
-              <th scope="col" className="px-4 py-3">Método</th>
-              <th scope="col" className="px-4 py-3">Cuenta bancaria</th>
-              <th scope="col" className="px-4 py-3">Referencia</th>
-              <th scope="col" className="px-4 py-3">Registrado por</th>
-              <th scope="col" className="px-4 py-3">Estado</th>
-              <th scope="col" className="px-4 py-3">Comprobante</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {payments.map((payment) => (
-              <tr key={payment.id}>
-                <td className="px-4 py-3 text-muted-foreground">{dateFormatter.format(payment.paymentDate)}</td>
-                <td className="px-4 py-3 font-medium text-foreground">
-                  {currencyFormatter.format(Number(payment.amount))}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{METHOD_LABELS[payment.method]}</td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {payment.bankAccount ? `${payment.bankAccount.bankName} — ${payment.bankAccount.alias}` : "—"}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{payment.reference || "—"}</td>
-                <td className="px-4 py-3 text-muted-foreground">{payment.registeredBy.name}</td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-col gap-1">
-                    <ValidationStatusBadge status={payment.validationStatus} />
-                    {payment.validationStatus === "REJECTED" && payment.rejectionReason && (
-                      <span className="text-xs text-muted-foreground">{payment.rejectionReason}</span>
-                    )}
-                    {canValidate && payment.validationStatus === "PENDING_VALIDATION" && (
-                      <Link
-                        href={`/comprobantes/${payment.id}`}
-                        className="text-xs font-medium text-primary hover:underline"
-                      >
-                        Revisar
-                      </Link>
-                    )}
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  {payment.receipt ? (
-                    <ReceiptLink fileUrl={payment.receipt.fileUrl} />
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <Table className="min-w-[1000px]">
+      <TableHeader>
+        <tr>
+          <TableHead>Fecha</TableHead>
+          <TableHead>Monto</TableHead>
+          <TableHead>Método</TableHead>
+          <TableHead>Cuenta bancaria</TableHead>
+          <TableHead>Referencia</TableHead>
+          <TableHead>Registrado por</TableHead>
+          <TableHead>Estado</TableHead>
+          <TableHead>Comprobante</TableHead>
+        </tr>
+      </TableHeader>
+      <TableBody>
+        {payments.map((payment) => (
+          <TableRow key={payment.id}>
+            <TableCell className="text-muted-foreground">{dateFormatter.format(payment.paymentDate)}</TableCell>
+            <TableCell className="font-medium text-foreground">
+              {currencyFormatter.format(Number(payment.amount))}
+            </TableCell>
+            <TableCell className="text-muted-foreground">{METHOD_LABELS[payment.method]}</TableCell>
+            <TableCell className="text-muted-foreground">
+              {payment.bankAccount ? `${payment.bankAccount.bankName} — ${payment.bankAccount.alias}` : "—"}
+            </TableCell>
+            <TableCell className="text-muted-foreground">{payment.reference || "—"}</TableCell>
+            <TableCell className="text-muted-foreground">{payment.registeredBy.name}</TableCell>
+            <TableCell>
+              <div className="flex flex-col gap-1">
+                <ValidationStatusBadge status={payment.validationStatus} />
+                {payment.validationStatus === "REJECTED" && payment.rejectionReason && (
+                  <span className="text-xs text-muted-foreground">{payment.rejectionReason}</span>
+                )}
+                {canValidate && payment.validationStatus === "PENDING_VALIDATION" && (
+                  <Link
+                    href={`/comprobantes/${payment.id}`}
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    Revisar
+                  </Link>
+                )}
+              </div>
+            </TableCell>
+            <TableCell>
+              {payment.receipt ? (
+                <ReceiptLink fileUrl={payment.receipt.fileUrl} />
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

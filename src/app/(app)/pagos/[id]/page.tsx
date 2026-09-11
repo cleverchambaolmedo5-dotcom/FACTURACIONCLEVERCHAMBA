@@ -9,6 +9,8 @@ import {
 import { getCardPaymentBankAccountForSaleForm } from "@/server/services/sale-service";
 import { requireModuleAccess } from "@/lib/auth/guards";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
+import { Card } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
 import { InstallmentStatus } from "@/generated/prisma/enums";
 import { PaymentForm } from "@/components/payments/payment-form";
 import { PaymentHistory } from "@/components/payments/payment-history";
@@ -73,7 +75,7 @@ export default async function CuotaDetallePage({
     <div className="flex flex-1 flex-col gap-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">
             Cuota N.° {installment.installmentNumber}
           </h2>
           <p className="text-sm text-muted-foreground">
@@ -87,7 +89,7 @@ export default async function CuotaDetallePage({
       </div>
 
       {rejectedPayment && (
-        <div className="flex flex-col gap-2 rounded-lg border border-error/30 bg-error/5 p-4">
+        <div className="flex flex-col gap-2 rounded-lg border border-error/30 bg-error-soft p-4">
           <div className="flex items-center gap-2 text-error">
             <AlertTriangle className="size-5 shrink-0" aria-hidden />
             <p className="text-sm font-semibold">Estado: Pago rechazado</p>
@@ -103,16 +105,13 @@ export default async function CuotaDetallePage({
               Rechazado el {rejectedAtFormatter.format(rejectedPayment.validatedAt)}
             </p>
           )}
-          <a
-            href="#registrar-pago"
-            className="inline-flex w-fit items-center gap-1.5 rounded-md bg-error px-3 py-1.5 text-sm font-medium text-white transition-colors hover:opacity-90"
-          >
+          <a href="#registrar-pago" className={buttonVariants({ variant: "danger", size: "sm", className: "w-fit" })}>
             Registrar nuevamente el pago
           </a>
         </div>
       )}
 
-      <div className="grid gap-4 rounded-lg border border-border bg-surface p-6 sm:grid-cols-2 lg:grid-cols-5">
+      <Card padding="lg" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Valor total</dt>
           <dd className="text-lg font-semibold text-foreground">
@@ -143,7 +142,7 @@ export default async function CuotaDetallePage({
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Vencimiento</dt>
           <dd className="text-lg font-semibold text-foreground">{dateFormatter.format(installment.dueDate)}</dd>
         </div>
-      </div>
+      </Card>
 
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-foreground">
@@ -158,7 +157,7 @@ export default async function CuotaDetallePage({
             cardBankAccount={cardBankAccount}
           />
         ) : (
-          <p className="rounded-lg border border-border bg-black/[0.02] px-4 py-3 text-sm text-muted-foreground">
+          <p className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
             Esta cuota ya está completamente pagada.
           </p>
         )}

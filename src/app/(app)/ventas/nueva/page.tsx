@@ -44,7 +44,7 @@ export default async function NuevaVentaPage() {
   return (
     <div className="flex flex-1 flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Nueva venta</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">Nueva venta</h2>
         <p className="text-sm text-muted-foreground">
           Completa los datos para registrar una nueva venta.
         </p>

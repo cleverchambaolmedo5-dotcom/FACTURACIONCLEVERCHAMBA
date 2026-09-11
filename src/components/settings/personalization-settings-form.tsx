@@ -4,14 +4,9 @@ import { useActionState } from "react";
 import type { SystemSettingsModel } from "@/generated/prisma/models/SystemSettings";
 import type { SettingsFormAction } from "./company-settings-form";
 import type { SettingsFormState } from "@/app/(app)/configuracion/actions";
-
-function fieldClass(hasError: boolean) {
-  return `w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-1 ${
-    hasError
-      ? "border-error focus:border-error focus:ring-error"
-      : "border-border focus:border-primary focus:ring-primary"
-  }`;
-}
+import { Select } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 const LOCALE_OPTIONS = [
   { value: "es-EC", label: "Español (Ecuador)" },
@@ -40,83 +35,67 @@ export function PersonalizationSettingsForm({
   const succeeded = state?.ok === true;
 
   return (
-    <form
-      action={formAction}
-      className="max-w-xl space-y-6 rounded-lg border border-border bg-surface p-6"
-      noValidate
-    >
-      <div>
-        <h3 className="text-sm font-semibold text-foreground">Personalización</h3>
-        <p className="text-xs text-muted-foreground">Colores y preferencias regionales.</p>
-      </div>
+    <Card padding="md" className="max-w-xl">
+      <form action={formAction} className="space-y-4" noValidate>
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Personalización</h3>
+          <p className="text-xs text-muted-foreground">Colores y preferencias regionales.</p>
+        </div>
 
-      <div className="space-y-1">
-        <label htmlFor="primaryColor" className="text-sm font-medium text-foreground">
-          Color principal
-        </label>
-        <input
-          id="primaryColor"
-          name="primaryColor"
-          type="color"
-          defaultValue={settings.primaryColor}
-          disabled={pending}
-          className="h-9 w-20 cursor-pointer rounded-md border border-border bg-surface p-1"
-        />
-        {errors?.primaryColor && <p className="text-sm text-error">{errors.primaryColor}</p>}
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="locale" className="text-sm font-medium text-foreground">
-            Idioma y región
+        <div className="space-y-1.5">
+          <label htmlFor="primaryColor" className="text-sm font-medium text-foreground">
+            Color principal
           </label>
-          <select
+          <input
+            id="primaryColor"
+            name="primaryColor"
+            type="color"
+            defaultValue={settings.primaryColor}
+            disabled={pending}
+            className="h-9 w-20 cursor-pointer rounded-md border border-border bg-surface p-1"
+          />
+          {errors?.primaryColor && <p className="text-xs text-error">{errors.primaryColor}</p>}
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Select
             id="locale"
             name="locale"
+            label="Idioma y región"
             defaultValue={settings.locale}
             disabled={pending}
-            className={fieldClass(!!errors?.locale)}
+            error={errors?.locale}
           >
             {LOCALE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </select>
-          {errors?.locale && <p className="text-sm text-error">{errors.locale}</p>}
-        </div>
+          </Select>
 
-        <div className="space-y-1">
-          <label htmlFor="timezone" className="text-sm font-medium text-foreground">
-            Zona horaria
-          </label>
-          <select
+          <Select
             id="timezone"
             name="timezone"
+            label="Zona horaria"
             defaultValue={settings.timezone}
             disabled={pending}
-            className={fieldClass(!!errors?.timezone)}
+            error={errors?.timezone}
           >
             {TIMEZONE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </select>
-          {errors?.timezone && <p className="text-sm text-error">{errors.timezone}</p>}
+          </Select>
         </div>
-      </div>
 
-      {formError && <p className="text-sm text-error">{formError}</p>}
-      {succeeded && <p className="text-sm text-success">Configuración guardada correctamente.</p>}
+        {formError && <p className="text-sm text-error">{formError}</p>}
+        {succeeded && <p className="text-sm text-success">Configuración guardada correctamente.</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-60"
-      >
-        {pending ? "Guardando…" : "Guardar cambios"}
-      </button>
-    </form>
+        <Button type="submit" disabled={pending} loading={pending}>
+          {pending ? "Guardando…" : "Guardar cambios"}
+        </Button>
+      </form>
+    </Card>
   );
 }

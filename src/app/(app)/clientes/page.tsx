@@ -6,6 +6,7 @@ import { listCustomersForUser } from "@/server/services/customer-service";
 import { CustomerSearch } from "@/components/customers/customer-search";
 import { CustomerTable } from "@/components/customers/customer-table";
 import { CustomerEmptyState } from "@/components/customers/customer-empty-state";
+import { buttonVariants } from "@/components/ui/button";
 import { siteConfig } from "@/config/site";
 
 export const metadata: Metadata = { title: `Clientes · ${siteConfig.name}` };
@@ -25,15 +26,10 @@ export default async function ClientesPage({
     <div className="flex flex-1 flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Clientes</h2>
-          <p className="text-sm text-muted-foreground">
-            Clientes de la academia y su vendedor responsable.
-          </p>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Clientes</h2>
+          <p className="text-sm text-muted-foreground">Gestiona y consulta tus clientes.</p>
         </div>
-        <Link
-          href="/clientes/nuevo"
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark"
-        >
+        <Link href="/clientes/nuevo" className={buttonVariants()}>
           <UserPlus className="size-4" aria-hidden />
           Nuevo cliente
         </Link>

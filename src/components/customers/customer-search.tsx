@@ -1,4 +1,5 @@
 import { Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 
 // Plain GET form -- no client-side JS required. Submitting navigates to
 // `/clientes?q=...`, which the page reads via `searchParams`. Works
@@ -10,12 +11,12 @@ export function CustomerSearch({ defaultValue }: { defaultValue?: string }) {
         className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
         aria-hidden
       />
-      <input
+      <Input
         type="search"
         name="q"
         defaultValue={defaultValue}
         placeholder="Buscar por nombre, email o teléfono…"
-        className="w-full rounded-md border border-border bg-surface py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+        className="pl-9"
       />
     </form>
   );

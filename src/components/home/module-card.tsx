@@ -29,13 +29,13 @@ export function ModuleCard({ module }: { module: CompanyModule }) {
         )}
       </div>
 
-      <div className="flex size-20 items-center justify-center rounded-full bg-blue-50 text-[#1447e6] transition-colors group-hover:bg-blue-100">
+      <div className="flex size-20 items-center justify-center rounded-full bg-primary-soft text-[#1447e6] transition-colors group-hover:bg-primary-soft-strong">
         <Icon className="size-10" aria-hidden />
       </div>
 
       <div className="space-y-1.5">
-        <h2 className="text-xl font-semibold text-slate-900">{module.title}</h2>
-        <p className="text-sm font-normal text-slate-500">{module.description}</p>
+        <h2 className="text-xl font-semibold text-foreground">{module.title}</h2>
+        <p className="text-sm font-normal text-muted-foreground">{module.description}</p>
       </div>
     </Link>
   );

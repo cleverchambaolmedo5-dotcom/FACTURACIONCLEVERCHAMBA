@@ -24,7 +24,7 @@ export default async function PerfilPage() {
   return (
     <div className="flex flex-1 flex-col gap-8">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Mi perfil</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">Mi perfil</h2>
         <p className="text-sm text-muted-foreground">
           Administra tu información personal y tu contraseña.
         </p>

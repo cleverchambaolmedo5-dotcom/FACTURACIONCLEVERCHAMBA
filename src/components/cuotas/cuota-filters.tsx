@@ -1,3 +1,6 @@
+import { Select } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "Todas" },
   { value: "PENDING", label: "Pendientes" },
@@ -5,9 +8,6 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "OVERDUE", label: "Vencidas" },
   { value: "UPCOMING", label: "Próximas a vencer" },
 ];
-
-const selectClass =
-  "rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary";
 
 // Renders only the filter controls, no <form> of its own -- meant to be
 // rendered inside the same GET <form> as the search input, mirroring
@@ -18,25 +18,15 @@ const selectClass =
 export function CuotaFilters({ defaultStatus }: { defaultStatus?: string }) {
   return (
     <div className="flex flex-wrap items-end gap-3">
-      <div className="space-y-1">
-        <label htmlFor="status" className="text-xs font-medium text-muted-foreground">
-          Estado
-        </label>
-        <select id="status" name="status" defaultValue={defaultStatus ?? ""} className={selectClass}>
-          {STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
+      <Select id="status" name="status" label="Estado" defaultValue={defaultStatus ?? ""} wrapperClassName="w-auto">
+        {STATUS_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </Select>
 
-      <button
-        type="submit"
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark"
-      >
-        Filtrar
-      </button>
+      <Button type="submit">Filtrar</Button>
     </div>
   );
 }

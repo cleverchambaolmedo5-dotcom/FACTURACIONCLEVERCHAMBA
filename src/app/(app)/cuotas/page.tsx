@@ -36,7 +36,7 @@ export default async function CuotasPage({
   return (
     <div className="flex flex-1 flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Cuotas</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">Cuotas</h2>
         <p className="text-sm text-muted-foreground">
           Seguimiento y control de las cuotas generadas por las ventas.
         </p>

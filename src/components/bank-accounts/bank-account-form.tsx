@@ -2,6 +2,11 @@
 
 import { useActionState } from "react";
 import type { BankAccountFormState } from "@/app/(app)/cuentas-bancarias/actions";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 export type BankAccountFormAction = (
   state: BankAccountFormState,
@@ -35,14 +40,6 @@ const EMPTY_DEFAULTS: BankAccountFormDefaults = {
 // UI convenience; the server never rejects a value outside of it.
 const ACCOUNT_TYPE_OPTIONS = ["Ahorros", "Corriente", "Otra"];
 
-function fieldClass(hasError: boolean) {
-  return `w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-1 ${
-    hasError
-      ? "border-error focus:border-error focus:ring-error"
-      : "border-border focus:border-primary focus:ring-primary"
-  }`;
-}
-
 /**
  * Shared create/edit form for the Cuentas Bancarias module, mirroring
  * ProductForm's structure. Only ever rendered for ADMIN -- the page itself
@@ -71,142 +68,107 @@ export function BankAccountForm({
   const formError = state && !state.ok ? state.formError : undefined;
 
   return (
-    <form action={formAction} className="max-w-xl space-y-4" noValidate>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="bankName" className="text-sm font-medium text-foreground">
-            Banco
-          </label>
-          <input
+    <Card padding="md" className="max-w-xl">
+      <form action={formAction} className="space-y-4" noValidate>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
             id="bankName"
             name="bankName"
+            label="Banco"
+            required
             defaultValue={defaults.bankName}
             disabled={pending}
-            className={fieldClass(!!errors?.bankName)}
+            error={errors?.bankName}
           />
-          {errors?.bankName && <p className="text-sm text-error">{errors.bankName}</p>}
-        </div>
 
-        <div className="space-y-1">
-          <label htmlFor="alias" className="text-sm font-medium text-foreground">
-            Alias de cuenta
-          </label>
-          <input
+          <Input
             id="alias"
             name="alias"
+            label="Alias de cuenta"
+            required
             defaultValue={defaults.alias}
             disabled={pending}
-            className={fieldClass(!!errors?.alias)}
+            error={errors?.alias}
           />
-          {errors?.alias && <p className="text-sm text-error">{errors.alias}</p>}
         </div>
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="accountHolder" className="text-sm font-medium text-foreground">
-          Titular
-        </label>
-        <input
+        <Input
           id="accountHolder"
           name="accountHolder"
+          label="Titular"
+          required
           defaultValue={defaults.accountHolder}
           disabled={pending}
-          className={fieldClass(!!errors?.accountHolder)}
+          error={errors?.accountHolder}
         />
-        {errors?.accountHolder && <p className="text-sm text-error">{errors.accountHolder}</p>}
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="accountNumber" className="text-sm font-medium text-foreground">
-          Número de cuenta
-        </label>
-        <input
+        <Input
           id="accountNumber"
           name="accountNumber"
+          label="Número de cuenta"
+          required
           defaultValue={defaults.accountNumber}
           disabled={pending}
-          className={fieldClass(!!errors?.accountNumber)}
+          error={errors?.accountNumber}
         />
-        {errors?.accountNumber && <p className="text-sm text-error">{errors.accountNumber}</p>}
-      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="accountType" className="text-sm font-medium text-foreground">
-            Tipo de cuenta
-          </label>
-          <select
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Select
             id="accountType"
             name="accountType"
+            label="Tipo de cuenta"
+            required
             defaultValue={defaults.accountType}
             disabled={pending}
-            className={fieldClass(!!errors?.accountType)}
+            error={errors?.accountType}
           >
             {ACCOUNT_TYPE_OPTIONS.map((type) => (
               <option key={type} value={type}>
                 {type}
               </option>
             ))}
-          </select>
-          {errors?.accountType && <p className="text-sm text-error">{errors.accountType}</p>}
-        </div>
+          </Select>
 
-        <div className="space-y-1">
-          <label htmlFor="currency" className="text-sm font-medium text-foreground">
-            Moneda
-          </label>
-          <input
+          <Input
             id="currency"
             name="currency"
+            label="Moneda"
+            required
             defaultValue={defaults.currency}
             disabled={pending}
-            className={fieldClass(!!errors?.currency)}
+            error={errors?.currency}
           />
-          {errors?.currency && <p className="text-sm text-error">{errors.currency}</p>}
         </div>
-      </div>
 
-      {mode === "edit" && (
-        <div className="space-y-1">
-          <label htmlFor="active" className="text-sm font-medium text-foreground">
-            Estado
-          </label>
-          <select
+        {mode === "edit" && (
+          <Select
             id="active"
             name="active"
+            label="Estado"
             defaultValue={defaults.active ? "true" : "false"}
             disabled={pending}
-            className={fieldClass(false)}
           >
             <option value="true">Activa</option>
             <option value="false">Inactiva</option>
-          </select>
-        </div>
-      )}
+          </Select>
+        )}
 
-      <div className="space-y-1">
-        <label htmlFor="instructions" className="text-sm font-medium text-foreground">
-          Instrucciones <span className="font-normal text-muted-foreground">(opcional)</span>
-        </label>
-        <textarea
+        <Textarea
           id="instructions"
           name="instructions"
+          label="Instrucciones"
+          helperText="Opcional."
           rows={3}
           defaultValue={defaults.instructions}
           disabled={pending}
-          className={fieldClass(false)}
         />
-      </div>
 
-      {formError && <p className="text-sm text-error">{formError}</p>}
+        {formError && <p className="text-sm text-error">{formError}</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-60"
-      >
-        {pending ? "Guardando…" : submitLabel}
-      </button>
-    </form>
+        <Button type="submit" disabled={pending} loading={pending}>
+          {pending ? "Guardando…" : submitLabel}
+        </Button>
+      </form>
+    </Card>
   );
 }

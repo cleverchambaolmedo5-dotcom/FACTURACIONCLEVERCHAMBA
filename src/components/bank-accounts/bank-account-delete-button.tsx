@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { Trash2 } from "lucide-react";
 import { deleteBankAccountAction, toggleBankAccountStatusAction } from "@/app/(app)/cuentas-bancarias/actions";
+import { Button } from "@/components/ui/button";
 
 // ADMIN-only (enforced again on the server inside deleteBankAccountForAdmin).
 // Invoked directly via useTransition, mirroring ProductDeleteButton --
@@ -55,7 +56,7 @@ export function BankAccountDeleteButton({
           setHasPayments(false);
           setConfirmOpen(true);
         }}
-        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-error transition-colors hover:bg-error/10"
+        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-error transition-colors hover:bg-error-soft"
       >
         <Trash2 className="size-3.5" aria-hidden />
         Eliminar
@@ -63,12 +64,12 @@ export function BankAccountDeleteButton({
 
       {confirmOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
           role="dialog"
           aria-modal="true"
           aria-labelledby="bank-account-delete-title"
         >
-          <div className="w-full max-w-sm rounded-lg bg-surface p-5 shadow-lg">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-5 shadow-modal">
             <h3 id="bank-account-delete-title" className="text-base font-semibold text-foreground">
               ¿Eliminar cuenta bancaria?
             </h3>
@@ -79,32 +80,24 @@ export function BankAccountDeleteButton({
             {error && <p className="mt-3 text-sm text-error">{error}</p>}
 
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setConfirmOpen(false)}
-                disabled={pending}
-                className="rounded-md border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-black/[0.03] disabled:opacity-60"
-              >
+              <Button type="button" variant="secondary" onClick={() => setConfirmOpen(false)} disabled={pending}>
                 Cancelar
-              </button>
+              </Button>
               {hasPayments && active ? (
-                <button
-                  type="button"
-                  onClick={handleDeactivate}
-                  disabled={pending}
-                  className="w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-60 sm:w-auto"
-                >
+                <Button type="button" onClick={handleDeactivate} disabled={pending} loading={pending} className="w-full sm:w-auto">
                   {pending ? "Desactivando…" : "Desactivar cuenta"}
-                </button>
+                </Button>
               ) : (
-                <button
+                <Button
                   type="button"
+                  variant="danger"
                   onClick={handleDelete}
                   disabled={pending}
-                  className="w-full rounded-md bg-error px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-60 sm:w-auto"
+                  loading={pending}
+                  className="w-full sm:w-auto"
                 >
                   {pending ? "Eliminando…" : "Eliminar cuenta"}
-                </button>
+                </Button>
               )}
             </div>
           </div>

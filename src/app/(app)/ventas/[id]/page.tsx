@@ -4,6 +4,7 @@ import { requireModuleAccess } from "@/lib/auth/guards";
 import { getSaleForUser } from "@/server/services/sale-service";
 import { computeInstallmentTotals } from "@/server/services/payment-service";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
+import { Card } from "@/components/ui/card";
 import { SaleInstallments } from "@/components/sales/sale-installments";
 import { PaymentHistory } from "@/components/payments/payment-history";
 import { ReceiptLink } from "@/components/payments/receipt-link";
@@ -66,7 +67,7 @@ export default async function VentaDetallePage({
     <div className="flex flex-1 flex-col gap-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Detalle de venta</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Detalle de venta</h2>
           <p className="text-sm text-muted-foreground">
             {sale.customer.fullName} · {sale.product.name}
           </p>
@@ -74,7 +75,7 @@ export default async function VentaDetallePage({
         <StatusBadge tone={STATUS_TONE[sale.status]}>{STATUS_LABELS[sale.status]}</StatusBadge>
       </div>
 
-      <div className="grid gap-4 rounded-lg border border-border bg-surface p-6 sm:grid-cols-2">
+      <Card padding="lg" className="grid gap-5 sm:grid-cols-3">
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Cliente</dt>
           <dd className="text-sm text-foreground">{sale.customer.fullName}</dd>
@@ -83,6 +84,31 @@ export default async function VentaDetallePage({
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Producto</dt>
           <dd className="text-sm text-foreground">{sale.product.name}</dd>
         </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Número de cuotas
+          </dt>
+          <dd className="text-sm text-foreground">{sale.installments.length}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Precio final
+          </dt>
+          <dd className="text-2xl font-bold text-primary">{currencyFormatter.format(Number(sale.finalPrice))}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total pagado</dt>
+          <dd className="text-2xl font-bold text-success">{currencyFormatter.format(paidCents / 100)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Saldo pendiente
+          </dt>
+          <dd className="text-2xl font-bold text-foreground">
+            {balanceCents > 0 ? currencyFormatter.format(balanceCents / 100) : "$0,00"}
+          </dd>
+        </div>
+        <div className="border-t border-border sm:col-span-3" />
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Vendedor</dt>
           <dd className="text-sm text-foreground">{sale.seller.name}</dd>
@@ -113,35 +139,17 @@ export default async function VentaDetallePage({
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Descuento</dt>
           <dd className="text-sm text-foreground">{currencyFormatter.format(Number(sale.discount))}</dd>
         </div>
-        <div>
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Precio final
-          </dt>
-          <dd className="text-2xl font-bold text-primary">{currencyFormatter.format(Number(sale.finalPrice))}</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Total pagado</dt>
-          <dd className="text-2xl font-bold text-success">{currencyFormatter.format(paidCents / 100)}</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Saldo pendiente
-          </dt>
-          <dd className="text-2xl font-bold text-foreground">
-            {balanceCents > 0 ? currencyFormatter.format(balanceCents / 100) : "$0,00"}
-          </dd>
-        </div>
-      </div>
+      </Card>
 
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-foreground">Comprobante de venta</h3>
         {sale.receipt ? (
-          <div className="flex items-center justify-between rounded-lg border border-border bg-surface p-4">
+          <Card padding="md" className="flex items-center justify-between">
             <p className="text-sm text-foreground">{sale.receipt.fileName}</p>
             <ReceiptLink fileUrl={sale.receipt.fileUrl} />
-          </div>
+          </Card>
         ) : (
-          <p className="rounded-lg border border-border bg-black/[0.02] px-4 py-3 text-sm text-muted-foreground">
+          <p className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
             Esta venta no tiene comprobante adjunto.
           </p>
         )}

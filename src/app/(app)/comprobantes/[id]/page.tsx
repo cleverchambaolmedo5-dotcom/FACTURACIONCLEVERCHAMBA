@@ -8,6 +8,7 @@ import { PaymentMethod } from "@/generated/prisma/enums";
 import { ValidationStatusBadge } from "@/components/payments/validation-status-badge";
 import { ReceiptLink } from "@/components/payments/receipt-link";
 import { PaymentValidationPanel } from "@/components/payments/payment-validation-panel";
+import { Card } from "@/components/ui/card";
 import { siteConfig } from "@/config/site";
 
 export const metadata: Metadata = { title: `Detalle de comprobante · ${siteConfig.name}` };
@@ -52,7 +53,7 @@ export default async function ComprobanteDetallePage({
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Detalle del comprobante</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Detalle del comprobante</h2>
           <p className="text-sm text-muted-foreground">
             {sale.customer.fullName} · {sale.product.name} · Cuota N.° {installment.installmentNumber}
           </p>
@@ -60,7 +61,7 @@ export default async function ComprobanteDetallePage({
         <ValidationStatusBadge status={payment.validationStatus} />
       </div>
 
-      <div className="grid gap-4 rounded-lg border border-border bg-surface p-6 sm:grid-cols-2 lg:grid-cols-3">
+      <Card padding="lg" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Cliente</dt>
           <dd className="text-sm text-foreground">{sale.customer.fullName}</dd>
@@ -129,9 +130,9 @@ export default async function ComprobanteDetallePage({
             )}
           </dd>
         </div>
-      </div>
+      </Card>
 
-      <div className="grid gap-4 rounded-lg border border-border bg-surface p-6 sm:grid-cols-3">
+      <Card padding="lg" className="grid gap-4 sm:grid-cols-3">
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Valor de la cuota
@@ -156,7 +157,7 @@ export default async function ComprobanteDetallePage({
             {currencyFormatter.format(payment.installmentBalanceCents / 100)}
           </dd>
         </div>
-      </div>
+      </Card>
 
       {payment.validationStatus === "PENDING_VALIDATION" ? (
         <div className="space-y-3">
@@ -164,7 +165,7 @@ export default async function ComprobanteDetallePage({
           <PaymentValidationPanel paymentId={payment.id} />
         </div>
       ) : (
-        <div className="space-y-2 rounded-lg border border-border bg-surface p-6">
+        <Card padding="lg" className="space-y-2">
           <h3 className="text-sm font-semibold text-foreground">Resultado de la validación</h3>
           <p className="text-sm text-muted-foreground">
             {payment.validationStatus === "APPROVED" ? "Aprobado" : "Rechazado"} por{" "}
@@ -174,7 +175,7 @@ export default async function ComprobanteDetallePage({
           {payment.validationStatus === "REJECTED" && payment.rejectionReason && (
             <p className="text-sm text-error">Motivo: {payment.rejectionReason}</p>
           )}
-        </div>
+        </Card>
       )}
     </div>
   );

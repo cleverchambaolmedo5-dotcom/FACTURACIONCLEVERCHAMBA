@@ -47,7 +47,7 @@ export default async function MovimientosBancariosPage({
     <div className="flex flex-1 flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Movimientos bancarios</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Movimientos bancarios</h2>
           <p className="text-sm text-muted-foreground">
             Ingresos y egresos de todas las cuentas bancarias, con su saldo resultante.
           </p>
@@ -66,7 +66,7 @@ export default async function MovimientosBancariosPage({
       </form>
 
       {transactions.length === 0 ? (
-        <p className="rounded-lg border border-border bg-black/[0.02] px-4 py-3 text-sm text-muted-foreground">
+        <p className="rounded-lg border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
           {hasFilters
             ? "No se encontraron movimientos con los filtros seleccionados."
             : "Todavía no hay movimientos bancarios registrados."}

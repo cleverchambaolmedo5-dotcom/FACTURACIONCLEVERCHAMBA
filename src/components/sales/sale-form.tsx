@@ -4,6 +4,12 @@ import { useActionState, useMemo, useRef, useState, type FormEvent } from "react
 import { PaymentMethod, UserRole } from "@/generated/prisma/enums";
 import type { SaleFormState } from "@/app/(app)/ventas/actions";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { CustomerSelector, type CustomerSearchResult } from "./customer-selector";
 import type { NewCustomerAction } from "./customer-create-modal";
 
@@ -76,12 +82,16 @@ const INSTALLMENT_OFFSET_DAYS = [0, 30, 60] as const;
 
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
 
-function fieldClass(hasError: boolean) {
-  return `w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-1 ${
+// Visual-only twin of Input's own class logic, for the two money fields
+// that need a "$" prefix glyph the shared primitive doesn't support --
+// same border/focus-ring language, just with left padding for the glyph.
+function moneyInputClass(hasError: boolean) {
+  return cn(
+    "w-full rounded-md border bg-surface py-2 pl-6 pr-3 text-sm text-foreground outline-none transition-colors focus:ring-2",
     hasError
-      ? "border-error focus:border-error focus:ring-error"
-      : "border-border focus:border-primary focus:ring-primary"
-  }`;
+      ? "border-error focus:border-error focus:ring-error/20"
+      : "border-border focus:border-primary focus:ring-primary/20",
+  );
 }
 
 function toCents(amount: number): number {
@@ -497,7 +507,7 @@ export function SaleForm({
     }
   }
 
-/** Handles the "Número de cuotas" selector -- can jump directly between any two counts (e.g. 1 -> 3), not just +/-1, so every derived array is resized (grown or shrunk) to the new count in one step. */
+  /** Handles the "Número de cuotas" selector -- can jump directly between any two counts (e.g. 1 -> 3), not just +/-1, so every derived array is resized (grown or shrunk) to the new count in one step. */
   function handleInstallmentsCountChange(rawValue: string) {
     const nextCount = Number(rawValue);
     if (!INSTALLMENT_COUNT_OPTIONS.includes(nextCount) || nextCount === installmentsCount) return;
@@ -567,7 +577,7 @@ export function SaleForm({
     const idPrefix = `installmentPayment-${cuotaIndex}-${method}`;
 
     return (
-      <div key={method} className="space-y-3 rounded-md border border-border bg-black/[0.02] p-3">
+      <div key={method} className="space-y-3 rounded-md border border-border bg-background p-3">
         <input type="hidden" name={`installmentPaymentMethod-${cuotaIndex}-${row}`} value={method} />
         {showHeader && (
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -593,7 +603,7 @@ export function SaleForm({
               value={draft.amount}
               onChange={(event) => updateDraft(cuotaIndex, method, { amount: event.target.value })}
               disabled={pending}
-              className={`${fieldClass(!!amountError)} pl-6`}
+              className={moneyInputClass(!!amountError)}
             />
           </div>
           {amountError && <p className="text-sm text-error">{amountError}</p>}
@@ -601,45 +611,49 @@ export function SaleForm({
 
         {methodRequiresBankAccount(method) && (
           <div className="space-y-1">
-            <label htmlFor={`${idPrefix}-bankAccount`} className="text-sm font-medium text-foreground">
-              Cuenta bancaria de destino *
-            </label>
             {isFixedBankAccountMethod(method) ? (
-              cardBankAccount ? (
-                <>
-                  <input
-                    type="hidden"
-                    name={`installmentPaymentBankAccountId-${cuotaIndex}-${row}`}
-                    value={cardBankAccount.id}
-                  />
-                  <p
-                    id={`${idPrefix}-bankAccount`}
-                    className="rounded-md border border-border bg-black/[0.02] px-3 py-2 text-sm text-foreground"
-                  >
-                    {cardBankAccount.bankName} — {cardBankAccount.alias} (
-                    {maskAccountNumber(cardBankAccount.accountNumber)})
+              <>
+                <label htmlFor={`${idPrefix}-bankAccount`} className="text-sm font-medium text-foreground">
+                  Cuenta bancaria de destino <span className="text-error">*</span>
+                </label>
+                {cardBankAccount ? (
+                  <>
+                    <input
+                      type="hidden"
+                      name={`installmentPaymentBankAccountId-${cuotaIndex}-${row}`}
+                      value={cardBankAccount.id}
+                    />
+                    <p
+                      id={`${idPrefix}-bankAccount`}
+                      className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                    >
+                      {cardBankAccount.bankName} — {cardBankAccount.alias} (
+                      {maskAccountNumber(cardBankAccount.accountNumber)})
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Los pagos con tarjeta siempre se acreditan a esta cuenta.
+                    </p>
+                  </>
+                ) : (
+                  <p id={`${idPrefix}-bankAccount`} className="rounded-md border border-error bg-error-soft px-3 py-2 text-sm text-error">
+                    No hay una cuenta bancaria configurada para pagos con tarjeta. Contacta a un
+                    administrador.
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    Los pagos con tarjeta siempre se acreditan a esta cuenta.
-                  </p>
-                </>
-              ) : (
-                <p id={`${idPrefix}-bankAccount`} className={fieldClass(true)}>
-                  No hay una cuenta bancaria configurada para pagos con tarjeta. Contacta a un
-                  administrador.
-                </p>
-              )
+                )}
+              </>
             ) : (
-              <select
+              <Select
                 id={`${idPrefix}-bankAccount`}
                 name={`installmentPaymentBankAccountId-${cuotaIndex}-${row}`}
+                label="Cuenta bancaria de destino"
+                required
                 value={draft.bankAccountId}
                 onChange={(event) => {
                   updateDraft(cuotaIndex, method, { bankAccountId: event.target.value });
                   clearMethodError(cuotaIndex, method, { bankAccountId: null });
                 }}
                 disabled={pending}
-                className={fieldClass(!!bankAccountError)}
+                error={bankAccountError}
               >
                 <option value="" disabled>
                   Selecciona una cuenta bancaria…
@@ -649,36 +663,28 @@ export function SaleForm({
                     {account.bankName} — {account.alias} ({maskAccountNumber(account.accountNumber)})
                   </option>
                 ))}
-              </select>
+              </Select>
             )}
-            {bankAccountError && <p className="text-sm text-error">{bankAccountError}</p>}
           </div>
         )}
 
         {method === PaymentMethod.CASH ? (
-          <div className="space-y-1">
-            <label htmlFor={`${idPrefix}-receivedBy`} className="text-sm font-medium text-foreground">
-              Entregado a *
-            </label>
-            <input
-              id={`${idPrefix}-receivedBy`}
-              name={`installmentPaymentReceivedByName-${cuotaIndex}-${row}`}
-              value={draft.receivedByName}
-              onChange={(event) => {
-                updateDraft(cuotaIndex, method, { receivedByName: event.target.value });
-                clearMethodError(cuotaIndex, method, { receivedByName: null });
-              }}
-              disabled={pending}
-              className={fieldClass(!!receivedByNameError)}
-            />
-            {receivedByNameError && <p className="text-sm text-error">{receivedByNameError}</p>}
-          </div>
+          <Input
+            id={`${idPrefix}-receivedBy`}
+            name={`installmentPaymentReceivedByName-${cuotaIndex}-${row}`}
+            label="Entregado a"
+            required
+            value={draft.receivedByName}
+            onChange={(event) => {
+              updateDraft(cuotaIndex, method, { receivedByName: event.target.value });
+              clearMethodError(cuotaIndex, method, { receivedByName: null });
+            }}
+            disabled={pending}
+            error={receivedByNameError}
+          />
         ) : (
           <div className="space-y-1">
-            <label htmlFor={`${idPrefix}-receipt`} className="text-sm font-medium text-foreground">
-              Voucher *
-            </label>
-            <input
+            <Input
               ref={(el) => {
                 if (!paymentReceiptRefs.current[cuotaIndex]) paymentReceiptRefs.current[cuotaIndex] = [];
                 paymentReceiptRefs.current[cuotaIndex][row] = el;
@@ -686,30 +692,27 @@ export function SaleForm({
               id={`${idPrefix}-receipt`}
               name={`installmentPaymentReceipt-${cuotaIndex}-${row}`}
               type="file"
+              label="Voucher"
+              required
               accept="application/pdf,image/jpeg,image/jpg,image/png,image/webp"
               disabled={pending}
               onChange={() => clearMethodError(cuotaIndex, method, { receipt: null })}
-              className={fieldClass(!!receiptError)}
+              error={receiptError}
             />
             <p className="text-xs text-muted-foreground">PDF, JPG, PNG o WEBP. Máximo 5 MB.</p>
-            {receiptError && <p className="text-sm text-error">{receiptError}</p>}
           </div>
         )}
 
-        <div className="space-y-1">
-          <label htmlFor={`${idPrefix}-notes`} className="text-sm font-medium text-foreground">
-            Observación <span className="font-normal text-muted-foreground">(opcional)</span>
-          </label>
-          <textarea
-            id={`${idPrefix}-notes`}
-            name={`installmentPaymentNotes-${cuotaIndex}-${row}`}
-            rows={2}
-            value={draft.notes}
-            onChange={(event) => updateDraft(cuotaIndex, method, { notes: event.target.value })}
-            disabled={pending}
-            className={fieldClass(false)}
-          />
-        </div>
+        <Textarea
+          id={`${idPrefix}-notes`}
+          name={`installmentPaymentNotes-${cuotaIndex}-${row}`}
+          label="Observación"
+          helperText="Opcional."
+          rows={2}
+          value={draft.notes}
+          onChange={(event) => updateDraft(cuotaIndex, method, { notes: event.target.value })}
+          disabled={pending}
+        />
       </div>
     );
   }
@@ -721,29 +724,28 @@ export function SaleForm({
       className="max-w-2xl space-y-6"
       noValidate
     >
-      <div className="space-y-1">
-        <label className="text-sm font-medium text-foreground">Cliente</label>
-        <CustomerSelector
-          error={errors?.customerId}
-          searchAction={searchCustomersAction}
-          createAction={createCustomerAction}
-          role={role}
-          sellers={sellers}
-          currentUserName={currentUserName}
-        />
-      </div>
+      <Card padding="md" className="space-y-4">
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-foreground">Cliente</label>
+          <CustomerSelector
+            error={errors?.customerId}
+            searchAction={searchCustomersAction}
+            createAction={createCustomerAction}
+            role={role}
+            sellers={sellers}
+            currentUserName={currentUserName}
+          />
+        </div>
 
-      <div className="space-y-1">
-        <label htmlFor="productId" className="text-sm font-medium text-foreground">
-          Producto
-        </label>
-        <select
+        <Select
           id="productId"
           name="productId"
+          label="Producto"
+          required
           value={productId}
           onChange={(event) => handleProductChange(event.target.value)}
           disabled={pending}
-          className={fieldClass(!!errors?.productId)}
+          error={errors?.productId}
         >
           <option value="" disabled>
             Selecciona un producto…
@@ -753,93 +755,79 @@ export function SaleForm({
               {product.name} — {currencyFormatter.format(product.officialPrice)}
             </option>
           ))}
-        </select>
-        {errors?.productId && <p className="text-sm text-error">{errors.productId}</p>}
-      </div>
+        </Select>
 
-      <div className="space-y-1">
-        <label htmlFor="saleDate" className="text-sm font-medium text-foreground">
-          Fecha de venta
-        </label>
-        <input
+        <Input
           id="saleDate"
           name="saleDate"
           type="date"
+          label="Fecha de venta"
+          required
           value={saleDate}
           onChange={(event) => handleSaleDateChange(event.target.value)}
           disabled={pending}
-          className={fieldClass(!!errors?.saleDate)}
+          error={errors?.saleDate}
         />
-        {errors?.saleDate && <p className="text-sm text-error">{errors.saleDate}</p>}
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="discount" className="text-sm font-medium text-foreground">
-          Descuento <span className="font-normal text-muted-foreground">(opcional)</span>
-        </label>
-        <input
+        <Input
           id="discount"
           name="discount"
           type="number"
+          label="Descuento"
+          helperText="Opcional."
           min="0"
           step="0.01"
           value={discount}
           onChange={(event) => handleDiscountChange(event.target.value)}
           disabled={pending}
-          className={fieldClass(!!errors?.discount)}
+          error={errors?.discount}
         />
-        {errors?.discount && <p className="text-sm text-error">{errors.discount}</p>}
-      </div>
 
-      <div className="space-y-1">
-        <label className="text-sm font-medium text-foreground">Vendedor</label>
         {canPickSeller ? (
-          <>
-            <select
-              name="sellerId"
-              defaultValue=""
-              disabled={pending}
-              className={fieldClass(!!errors?.sellerId)}
-            >
-              <option value="" disabled>
-                Selecciona un vendedor…
-              </option>
-              {sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>
-                  {seller.name}
-                </option>
-              ))}
-            </select>
-            {errors?.sellerId && <p className="text-sm text-error">{errors.sellerId}</p>}
-          </>
-        ) : (
-          <p className="rounded-md border border-border bg-black/[0.02] px-3 py-2 text-sm text-muted-foreground">
-            Se te asignará automáticamente a ti ({currentUserName}).
-          </p>
-        )}
-      </div>
-
-      <div className="space-y-3">
-        <div className="space-y-1">
-          <label htmlFor="installmentsCount" className="text-sm font-medium text-foreground">
-            Número de cuotas
-          </label>
-          <input type="hidden" name="installments" value={installmentsCount} />
-          <select
-            id="installmentsCount"
-            value={installmentsCount}
-            onChange={(event) => handleInstallmentsCountChange(event.target.value)}
+          <Select
+            name="sellerId"
+            label="Vendedor"
+            required
+            defaultValue=""
             disabled={pending}
-            className={fieldClass(!!errors?.installments)}
+            error={errors?.sellerId}
           >
-            {INSTALLMENT_COUNT_OPTIONS.map((count) => (
-              <option key={count} value={count}>
-                {count} {count === 1 ? "cuota" : "cuotas"}
+            <option value="" disabled>
+              Selecciona un vendedor…
+            </option>
+            {sellers.map((seller) => (
+              <option key={seller.id} value={seller.id}>
+                {seller.name}
               </option>
             ))}
-          </select>
-          {errors?.installments && <p className="text-sm text-error">{errors.installments}</p>}
-        </div>
+          </Select>
+        ) : (
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">Vendedor</label>
+            <p className="rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
+              Se te asignará automáticamente a ti ({currentUserName}).
+            </p>
+          </div>
+        )}
+      </Card>
+
+      <div className="space-y-3">
+        <input type="hidden" name="installments" value={installmentsCount} />
+        <Select
+          id="installmentsCount"
+          label="Número de cuotas"
+          value={installmentsCount}
+          onChange={(event) => handleInstallmentsCountChange(event.target.value)}
+          disabled={pending}
+          error={errors?.installments}
+        >
+          {INSTALLMENT_COUNT_OPTIONS.map((count) => (
+            <option key={count} value={count}>
+              {count} {count === 1 ? "cuota" : "cuotas"}
+            </option>
+          ))}
+        </Select>
+
         <div className="space-y-3">
           {Array.from({ length: installmentsCount }).map((_, index) => {
             const cuotaAmountCents = installmentAmountCentsPreview[index] ?? 0;
@@ -850,7 +838,7 @@ export function SaleForm({
             const methods = activeMethods(index);
 
             return (
-              <div key={index} className="rounded-lg border border-border bg-surface p-4">
+              <Card key={index} padding="sm">
                 <p className="text-sm font-semibold text-foreground">Cuota {index + 1}</p>
 
                 {index === 0 ? (
@@ -862,7 +850,7 @@ export function SaleForm({
                       {installmentsCount === 1 ? "Monto acordado" : "Primera cuota acordada"}
                     </label>
                     {installmentsCount === 1 ? (
-                      <p className="rounded-md border border-border bg-black/[0.02] px-3 py-2 text-sm text-foreground">
+                      <p className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground">
                         {currencyFormatter.format(cuotaAmountCents / 100)}
                       </p>
                     ) : (
@@ -881,7 +869,7 @@ export function SaleForm({
                             value={firstInstallmentAmount}
                             onChange={(event) => handleFirstInstallmentAmountChange(event.target.value)}
                             disabled={pending}
-                            className={`${fieldClass(!!firstInstallmentError)} pl-6`}
+                            className={moneyInputClass(!!firstInstallmentError)}
                           />
                         </div>
                         <p className="text-xs text-muted-foreground">
@@ -900,7 +888,7 @@ export function SaleForm({
                       Monto acordado
                       <StatusBadge tone="neutral">Automático</StatusBadge>
                     </span>
-                    <p className="rounded-md border border-dashed border-border bg-black/[0.02] px-3 py-2 text-sm text-foreground">
+                    <p className="rounded-md border border-dashed border-border bg-background px-3 py-2 text-sm text-foreground">
                       {currencyFormatter.format(cuotaAmountCents / 100)}
                     </p>
                     <p className="text-xs text-muted-foreground">
@@ -909,54 +897,37 @@ export function SaleForm({
                   </div>
                 )}
 
-                <div className="mt-2 space-y-1">
-                  <label
-                    htmlFor={`installmentDueDate-${index}`}
-                    className="text-sm font-medium text-foreground"
-                  >
-                    Fecha de vencimiento
-                  </label>
-                  <input
-                    id={`installmentDueDate-${index}`}
-                    name="installmentDueDates"
-                    type="date"
-                    value={dueDates[index] ?? ""}
-                    onChange={(event) => handleDueDateChange(index, event.target.value)}
-                    disabled={pending}
-                    className={fieldClass(!!errors?.installmentDates?.[index])}
-                  />
-                  {errors?.installmentDates?.[index] && (
-                    <p className="text-sm text-error">{errors.installmentDates[index]}</p>
-                  )}
-                </div>
+                <Input
+                  id={`installmentDueDate-${index}`}
+                  name="installmentDueDates"
+                  type="date"
+                  label="Fecha de vencimiento"
+                  wrapperClassName="mt-2"
+                  value={dueDates[index] ?? ""}
+                  onChange={(event) => handleDueDateChange(index, event.target.value)}
+                  disabled={pending}
+                  error={errors?.installmentDates?.[index]}
+                />
 
                 <div className="mt-3 space-y-3">
-                  <div className="space-y-1">
-                    <label
-                      htmlFor={`cuotaMode-${index}`}
-                      className="text-sm font-medium text-foreground"
-                    >
-                      Forma de pago
-                    </label>
-                    <select
-                      id={`cuotaMode-${index}`}
-                      value={cuota.mode}
-                      onChange={(event) => handleModeChange(index, event.target.value)}
-                      disabled={pending}
-                      className={fieldClass(false)}
-                    >
-                      <option value="">Sin pago registrado todavía</option>
-                      {PAYMENT_METHODS.map((method) => (
-                        <option key={method} value={method}>
-                          {METHOD_LABELS[method]}
-                        </option>
-                      ))}
-                      <option value={MIXED}>Mixto</option>
-                    </select>
-                  </div>
+                  <Select
+                    id={`cuotaMode-${index}`}
+                    label="Forma de pago"
+                    value={cuota.mode}
+                    onChange={(event) => handleModeChange(index, event.target.value)}
+                    disabled={pending}
+                  >
+                    <option value="">Sin pago registrado todavía</option>
+                    {PAYMENT_METHODS.map((method) => (
+                      <option key={method} value={method}>
+                        {METHOD_LABELS[method]}
+                      </option>
+                    ))}
+                    <option value={MIXED}>Mixto</option>
+                  </Select>
 
                   {cuota.mode === MIXED && (
-                    <div className="space-y-2 rounded-md border border-border bg-black/[0.02] p-3">
+                    <div className="space-y-2 rounded-md border border-border bg-background p-3">
                       <p className="text-sm font-medium text-foreground">Selecciona las formas de pago</p>
                       <div className="grid grid-cols-2 gap-2">
                         {PAYMENT_METHODS.map((method) => (
@@ -969,7 +940,7 @@ export function SaleForm({
                               checked={cuota.mixedMethods.includes(method)}
                               onChange={(event) => toggleMixedMethod(index, method, event.target.checked)}
                               disabled={pending}
-                              className="h-4 w-4 rounded border-border"
+                              className="h-4 w-4 rounded border-border accent-primary"
                             />
                             {METHOD_LABELS[method]}
                           </label>
@@ -1012,13 +983,13 @@ export function SaleForm({
                       "La suma de los pagos supera el monto de la cuota."}
                   </p>
                 )}
-              </div>
+              </Card>
             );
           })}
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-black/[0.02] p-4">
+      <Card padding="md" className="bg-background">
         <dl className="grid grid-cols-2 gap-y-2 text-sm sm:grid-cols-3">
           <dt className="text-muted-foreground">Precio original</dt>
           <dd className="col-span-1 text-right font-medium text-foreground sm:col-span-2">
@@ -1045,17 +1016,13 @@ export function SaleForm({
           El precio final y el monto de cada cuota se recalculan y validan en el servidor; esta
           vista es solo una referencia.
         </p>
-      </div>
+      </Card>
 
       {formError && <p className="text-sm text-error">{formError}</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-60"
-      >
+      <Button type="submit" disabled={pending} loading={pending}>
         {pending ? "Guardando…" : "Registrar venta"}
-      </button>
+      </Button>
     </form>
   );
 }

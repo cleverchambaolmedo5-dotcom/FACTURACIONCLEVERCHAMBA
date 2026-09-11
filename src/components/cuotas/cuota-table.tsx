@@ -2,6 +2,9 @@ import Link from "next/link";
 import { Eye, CreditCard } from "lucide-react";
 import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import type { CuotaBucket, DecoratedCuotaRow } from "@/server/services/payment-service";
+import { UserAvatar } from "@/components/shared/user-avatar";
+import { cn } from "@/lib/utils";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 
 const dateFormatter = new Intl.DateTimeFormat("es-EC", { dateStyle: "medium", timeZone: "UTC" });
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
@@ -25,70 +28,75 @@ const STATUS_LABELS: Record<CuotaBucket, string> = {
 // estado and full payment history.
 export function CuotaTable({ installments }: { installments: DecoratedCuotaRow[] }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1080px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <th scope="col" className="px-4 py-3">Cliente</th>
-              <th scope="col" className="px-4 py-3">Producto</th>
-              <th scope="col" className="px-4 py-3">Cuota</th>
-              <th scope="col" className="px-4 py-3">Monto acordado</th>
-              <th scope="col" className="px-4 py-3">Pagado</th>
-              <th scope="col" className="px-4 py-3">Saldo pendiente</th>
-              <th scope="col" className="px-4 py-3">Vencimiento</th>
-              <th scope="col" className="px-4 py-3">Estado</th>
-              <th scope="col" className="px-4 py-3 text-right">Acción</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {installments.map((installment) => (
-              <tr key={installment.id} className="hover:bg-black/[0.02]">
-                <td className="px-4 py-3 font-medium text-foreground">
-                  {installment.sale.customer.fullName}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{installment.sale.product.name}</td>
-                <td className="px-4 py-3 text-muted-foreground">N.º {installment.installmentNumber}</td>
-                <td className="px-4 py-3 text-foreground">
-                  {currencyFormatter.format(installment.totalCents / 100)}
-                </td>
-                <td className="px-4 py-3 text-foreground">
-                  {currencyFormatter.format(installment.paidCents / 100)}
-                </td>
-                <td className="px-4 py-3 font-semibold text-foreground">
-                  {currencyFormatter.format(installment.balanceCents / 100)}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{dateFormatter.format(installment.dueDate)}</td>
-                <td className="px-4 py-3">
-                  <StatusBadge tone={STATUS_TONE[installment.bucket]}>
-                    {STATUS_LABELS[installment.bucket]}
-                  </StatusBadge>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <div className="flex justify-end gap-2">
-                    {installment.balanceCents > 0 && (
-                      <Link
-                        href={`/pagos/${installment.id}#registrar-pago`}
-                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
-                      >
-                        <CreditCard className="size-3.5" aria-hidden />
-                        Pagar
-                      </Link>
-                    )}
-                    <Link
-                      href={`/pagos/${installment.id}`}
-                      className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-black/[0.04] hover:text-foreground"
-                    >
-                      <Eye className="size-3.5" aria-hidden />
-                      Ver
-                    </Link>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <Table className="min-w-[1080px]">
+      <TableHeader>
+        <tr>
+          <TableHead>Cliente</TableHead>
+          <TableHead>Producto</TableHead>
+          <TableHead>Cuota</TableHead>
+          <TableHead>Monto acordado</TableHead>
+          <TableHead>Pagado</TableHead>
+          <TableHead>Saldo pendiente</TableHead>
+          <TableHead>Vencimiento</TableHead>
+          <TableHead>Estado</TableHead>
+          <TableHead className="text-right">Acción</TableHead>
+        </tr>
+      </TableHeader>
+      <TableBody>
+        {installments.map((installment) => (
+          <TableRow key={installment.id}>
+            <TableCell>
+              <div className="flex items-center gap-3">
+                <UserAvatar name={installment.sale.customer.fullName} size="sm" />
+                <span className="font-medium text-foreground">{installment.sale.customer.fullName}</span>
+              </div>
+            </TableCell>
+            <TableCell className="text-muted-foreground">{installment.sale.product.name}</TableCell>
+            <TableCell className="text-muted-foreground">N.º {installment.installmentNumber}</TableCell>
+            <TableCell className="text-foreground">
+              {currencyFormatter.format(installment.totalCents / 100)}
+            </TableCell>
+            <TableCell className="text-foreground">
+              {currencyFormatter.format(installment.paidCents / 100)}
+            </TableCell>
+            <TableCell className="font-semibold text-foreground">
+              {currencyFormatter.format(installment.balanceCents / 100)}
+            </TableCell>
+            <TableCell
+              className={cn(
+                installment.bucket === "OVERDUE" ? "font-medium text-error" : "text-muted-foreground",
+              )}
+            >
+              {dateFormatter.format(installment.dueDate)}
+            </TableCell>
+            <TableCell>
+              <StatusBadge tone={STATUS_TONE[installment.bucket]}>
+                {STATUS_LABELS[installment.bucket]}
+              </StatusBadge>
+            </TableCell>
+            <TableCell className="text-right">
+              <div className="flex justify-end gap-2">
+                {installment.balanceCents > 0 && (
+                  <Link
+                    href={`/pagos/${installment.id}#registrar-pago`}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-soft"
+                  >
+                    <CreditCard className="size-3.5" aria-hidden />
+                    Pagar
+                  </Link>
+                )}
+                <Link
+                  href={`/pagos/${installment.id}`}
+                  className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-black/[0.04] hover:text-foreground"
+                >
+                  <Eye className="size-3.5" aria-hidden />
+                  Ver
+                </Link>
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

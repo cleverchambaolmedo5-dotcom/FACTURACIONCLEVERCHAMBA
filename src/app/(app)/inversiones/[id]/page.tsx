@@ -43,7 +43,7 @@ export default async function InversionDetallePage({
       <div className="flex flex-1 flex-col gap-6">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Detalle de inversión</h2>
+            <h2 className="text-xl font-semibold tracking-tight text-foreground">Detalle de inversión</h2>
             <p className="text-sm text-muted-foreground">{investment.customer.fullName}</p>
           </div>
           <InvestmentStatusBadge status={investment.status} />
@@ -94,7 +94,7 @@ export default async function InversionDetallePage({
     <div className="flex flex-1 flex-col gap-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Detalle de inversión</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Detalle de inversión</h2>
           <p className="text-sm text-muted-foreground">{investment.customer.fullName}</p>
         </div>
         <InvestmentStatusBadge status={investment.status} />

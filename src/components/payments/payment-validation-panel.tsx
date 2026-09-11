@@ -6,14 +6,9 @@ import {
   rejectPaymentAction,
   type RejectPaymentFormState,
 } from "@/app/(app)/comprobantes/actions";
-
-function fieldClass(hasError: boolean) {
-  return `w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-1 ${
-    hasError
-      ? "border-error focus:border-error focus:ring-error"
-      : "border-border focus:border-primary focus:ring-primary"
-  }`;
-}
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 // Only rendered for a still-PENDING_VALIDATION payment (see
 // comprobantes/[id]/page.tsx) -- both forms re-verify the role and the
@@ -47,46 +42,34 @@ export function PaymentValidationPanel({ paymentId }: { paymentId: string }) {
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <div className="space-y-3 rounded-lg border border-success/30 bg-success/5 p-4">
+      <Card padding="md" className="space-y-3 border-success/30 bg-success-soft">
         <h4 className="text-sm font-semibold text-foreground">Aprobar pago</h4>
         <p className="text-xs text-muted-foreground">
           El monto pasará a contar como pagado aprobado y reducirá el saldo de la cuota.
         </p>
         {approveError && <p className="text-sm text-error">{approveError}</p>}
-        <button
-          type="button"
-          onClick={handleApprove}
-          disabled={pending}
-          className="rounded-md bg-success px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-60"
-        >
+        <Button type="button" variant="primary" className="bg-success hover:bg-success/90" onClick={handleApprove} disabled={pending} loading={approvePending}>
           {approvePending ? "Aprobando…" : "Aprobar pago"}
-        </button>
-      </div>
+        </Button>
+      </Card>
 
-      <form action={rejectFormAction} className="space-y-3 rounded-lg border border-error/30 bg-error/5 p-4">
-        <h4 className="text-sm font-semibold text-foreground">Rechazar pago</h4>
-        <div className="space-y-1">
-          <label htmlFor="reason" className="text-xs font-medium text-muted-foreground">
-            Motivo del rechazo
-          </label>
-          <textarea
+      <Card padding="md" className="space-y-3 border-error/30 bg-error-soft">
+        <form action={rejectFormAction} className="space-y-3">
+          <h4 className="text-sm font-semibold text-foreground">Rechazar pago</h4>
+          <Textarea
             id="reason"
             name="reason"
+            label="Motivo del rechazo"
             rows={2}
             disabled={pending}
-            className={fieldClass(!!rejectFieldError)}
+            error={rejectFieldError}
           />
-          {rejectFieldError && <p className="text-sm text-error">{rejectFieldError}</p>}
-        </div>
-        {rejectFormError && <p className="text-sm text-error">{rejectFormError}</p>}
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-md bg-error px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-60"
-        >
-          {rejectPending ? "Rechazando…" : "Rechazar pago"}
-        </button>
-      </form>
+          {rejectFormError && <p className="text-sm text-error">{rejectFormError}</p>}
+          <Button type="submit" variant="danger" disabled={pending} loading={rejectPending}>
+            {rejectPending ? "Rechazando…" : "Rechazar pago"}
+          </Button>
+        </form>
+      </Card>
     </div>
   );
 }

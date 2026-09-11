@@ -29,7 +29,7 @@ export default async function EditarUsuarioPage({
   return (
     <div className="flex flex-1 flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Editar usuario</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">Editar usuario</h2>
         <p className="text-sm text-muted-foreground">{managedUser.name}</p>
       </div>
 

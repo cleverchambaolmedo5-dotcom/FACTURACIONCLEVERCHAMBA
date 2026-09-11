@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 // Root-level error boundary. Catches everything the more specific
 // (app)/error.tsx can't: failures in the public routes ("/", "/login",
@@ -29,7 +30,7 @@ export default function RootSegmentError({
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-6 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-error/10 text-error">
+      <div className="flex size-12 items-center justify-center rounded-full bg-error-soft text-error">
         <AlertTriangle className="size-6" aria-hidden />
       </div>
       <div className="space-y-1.5">
@@ -41,13 +42,9 @@ export default function RootSegmentError({
           <p className="text-xs text-muted-foreground/70">Código de referencia: {error.digest}</p>
         )}
       </div>
-      <button
-        type="button"
-        onClick={retry}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark"
-      >
+      <Button type="button" onClick={retry}>
         Reintentar
-      </button>
+      </Button>
     </div>
   );
 }

@@ -27,10 +27,10 @@ export function BankAccountSummaryGrid({ accounts }: { accounts: BankAccountSumm
         <Link
           key={account.id}
           href={`/cuentas-bancarias/${account.id}`}
-          className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5 transition-colors hover:bg-black/[0.02]"
+          className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5 shadow-card transition-colors hover:bg-row-hover"
         >
           <div className="flex items-center gap-4">
-            <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <div className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary">
               <Landmark className="size-5" aria-hidden />
             </div>
             <div className="min-w-0">

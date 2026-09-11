@@ -39,7 +39,7 @@ export default async function EditarClientePage({
     <div className="flex flex-1 flex-col gap-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Editar cliente</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Editar cliente</h2>
           <p className="text-sm text-muted-foreground">{customer.fullName}</p>
         </div>
         {user.role === UserRole.ADMIN && (

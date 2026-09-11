@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useEffectEvent, useRef, useState, useTransition } from "react";
-import { Search } from "lucide-react";
+import { Search, UserRoundPlus } from "lucide-react";
 import { UserRole } from "@/generated/prisma/enums";
+import { Input } from "@/components/ui/input";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import {
   CustomerCreateModal,
   type CreatedCustomer,
@@ -121,12 +123,15 @@ export function CustomerSelector({
       <input type="hidden" name="customerId" value={selected?.id ?? ""} />
 
       {selected ? (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-black/[0.02] px-3 py-2">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-foreground">{selected.fullName}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {selected.identification || "—"} · {selected.phone}
-            </p>
+        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <UserAvatar name={selected.fullName} size="sm" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-foreground">{selected.fullName}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {selected.identification || "—"} · {selected.phone}
+              </p>
+            </div>
           </div>
           <button
             type="button"
@@ -143,7 +148,7 @@ export function CustomerSelector({
               className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden
             />
-            <input
+            <Input
               type="search"
               value={query}
               onChange={(event) => handleQueryChange(event.target.value)}
@@ -161,24 +166,21 @@ export function CustomerSelector({
               }}
               placeholder="Buscar por nombre, teléfono o identificación…"
               aria-label="Buscar cliente"
-              className={`w-full rounded-md border bg-surface py-2 pl-9 pr-3 text-sm text-foreground outline-none focus:ring-1 ${
-                error
-                  ? "border-error focus:border-error focus:ring-error"
-                  : "border-border focus:border-primary focus:ring-primary"
-              }`}
+              error={error}
+              className="pl-9"
             />
           </div>
 
           {isPending && <p className="text-sm text-muted-foreground">Buscando…</p>}
 
           {!isPending && results.length > 0 && (
-            <ul className="divide-y divide-border rounded-md border border-border bg-surface">
+            <ul className="divide-y divide-border overflow-hidden rounded-md border border-border bg-surface">
               {results.map((customer) => (
                 <li key={customer.id}>
                   <button
                     type="button"
                     onClick={() => handleSelect(customer)}
-                    className="flex w-full flex-col items-start px-3 py-2 text-left text-sm hover:bg-black/[0.03]"
+                    className="flex w-full flex-col items-start px-3 py-2 text-left text-sm transition-colors hover:bg-row-hover"
                   >
                     <span className="font-medium text-foreground">{customer.fullName}</span>
                     <span className="text-xs text-muted-foreground">
@@ -199,9 +201,10 @@ export function CustomerSelector({
           <button
             type="button"
             onClick={() => setModalOpen(true)}
-            className="text-sm font-medium text-primary hover:underline"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
           >
-            + Registrar nuevo cliente
+            <UserRoundPlus className="size-3.5" aria-hidden />
+            Registrar nuevo cliente
           </button>
         </>
       )}

@@ -4,14 +4,9 @@ import { useActionState } from "react";
 import type { SystemSettingsModel } from "@/generated/prisma/models/SystemSettings";
 import type { SettingsFormAction } from "./company-settings-form";
 import type { SettingsFormState } from "@/app/(app)/configuracion/actions";
-
-function fieldClass(hasError: boolean) {
-  return `w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-1 ${
-    hasError
-      ? "border-error focus:border-error focus:ring-error"
-      : "border-border focus:border-primary focus:ring-primary"
-  }`;
-}
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 export function SaleDefaultsSettingsForm({
   action,
@@ -26,83 +21,56 @@ export function SaleDefaultsSettingsForm({
   const succeeded = state?.ok === true;
 
   return (
-    <form
-      action={formAction}
-      className="max-w-xl space-y-6 rounded-lg border border-border bg-surface p-6"
-      noValidate
-    >
-      <div>
-        <h3 className="text-sm font-semibold text-foreground">Configuración de ventas</h3>
-        <p className="text-xs text-muted-foreground">
-          Preferencias predeterminadas para nuevas ventas.
-        </p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="saleDefaultCurrency" className="text-sm font-medium text-foreground">
-            Moneda predeterminada
-          </label>
-          <input
-            id="saleDefaultCurrency"
-            name="saleDefaultCurrency"
-            defaultValue={settings.saleDefaultCurrency}
-            disabled={pending}
-            className={fieldClass(!!errors?.saleDefaultCurrency)}
-          />
-          {errors?.saleDefaultCurrency && (
-            <p className="text-sm text-error">{errors.saleDefaultCurrency}</p>
-          )}
+    <Card padding="md" className="max-w-xl">
+      <form action={formAction} className="space-y-4" noValidate>
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Configuración de ventas</h3>
+          <p className="text-xs text-muted-foreground">
+            Preferencias predeterminadas para nuevas ventas.
+          </p>
         </div>
 
-        <div className="space-y-1">
-          <label htmlFor="saleMaxInstallments" className="text-sm font-medium text-foreground">
-            Número de cuotas predeterminado
-          </label>
-          <input
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
+            id="saleDefaultCurrency"
+            name="saleDefaultCurrency"
+            label="Moneda predeterminada"
+            defaultValue={settings.saleDefaultCurrency}
+            disabled={pending}
+            error={errors?.saleDefaultCurrency}
+          />
+
+          <Input
             id="saleMaxInstallments"
             name="saleMaxInstallments"
             type="number"
+            label="Número de cuotas predeterminado"
             min={1}
             max={3}
             defaultValue={settings.saleMaxInstallments}
             disabled={pending}
-            className={fieldClass(!!errors?.saleMaxInstallments)}
+            error={errors?.saleMaxInstallments}
           />
-          {errors?.saleMaxInstallments && (
-            <p className="text-sm text-error">{errors.saleMaxInstallments}</p>
-          )}
         </div>
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="salePaymentTermDays" className="text-sm font-medium text-foreground">
-          Plazo predeterminado para la primera cuota (días)
-        </label>
-        <input
+        <Input
           id="salePaymentTermDays"
           name="salePaymentTermDays"
           type="number"
+          label="Plazo predeterminado para la primera cuota (días)"
           min={1}
           defaultValue={settings.salePaymentTermDays}
           disabled={pending}
-          className={fieldClass(!!errors?.salePaymentTermDays)}
+          error={errors?.salePaymentTermDays}
         />
-        {errors?.salePaymentTermDays && (
-          <p className="text-sm text-error">{errors.salePaymentTermDays}</p>
-        )}
-      </div>
 
-      {formError && <p className="text-sm text-error">{formError}</p>}
-      {succeeded && <p className="text-sm text-success">Configuración guardada correctamente.</p>}
+        {formError && <p className="text-sm text-error">{formError}</p>}
+        {succeeded && <p className="text-sm text-success">Configuración guardada correctamente.</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-60"
-      >
-        {pending ? "Guardando…" : "Guardar cambios"}
-      </button>
-    </form>
+        <Button type="submit" disabled={pending} loading={pending}>
+          {pending ? "Guardando…" : "Guardar cambios"}
+        </Button>
+      </form>
+    </Card>
   );
 }

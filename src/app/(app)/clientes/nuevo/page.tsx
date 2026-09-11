@@ -16,7 +16,7 @@ export default async function NuevoClientePage() {
   return (
     <div className="flex flex-1 flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Nuevo cliente</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">Nuevo cliente</h2>
         <p className="text-sm text-muted-foreground">
           Completa los datos para registrar un nuevo cliente.
         </p>

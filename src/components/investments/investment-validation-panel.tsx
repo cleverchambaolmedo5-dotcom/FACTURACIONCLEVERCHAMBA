@@ -47,7 +47,7 @@ export function InvestmentValidationPanel({ investmentId }: { investmentId: stri
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <div className="space-y-3 rounded-lg border border-success/30 bg-success/5 p-4">
+      <div className="space-y-3 rounded-lg border border-success/30 bg-success-soft p-4">
         <h4 className="text-sm font-semibold text-foreground">Aprobar inversión</h4>
         <p className="text-xs text-muted-foreground">
           La inversión pasará a estado Activa.
@@ -63,7 +63,7 @@ export function InvestmentValidationPanel({ investmentId }: { investmentId: stri
         </button>
       </div>
 
-      <form action={rejectFormAction} className="space-y-3 rounded-lg border border-error/30 bg-error/5 p-4">
+      <form action={rejectFormAction} className="space-y-3 rounded-lg border border-error/30 bg-error-soft p-4">
         <h4 className="text-sm font-semibold text-foreground">Rechazar inversión</h4>
         <div className="space-y-1">
           <label htmlFor="reason" className="text-xs font-medium text-muted-foreground">

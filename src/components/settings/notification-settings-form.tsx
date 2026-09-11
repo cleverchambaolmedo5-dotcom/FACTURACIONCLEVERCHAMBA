@@ -4,14 +4,9 @@ import { useActionState } from "react";
 import type { SystemSettingsModel } from "@/generated/prisma/models/SystemSettings";
 import type { SettingsFormAction } from "./company-settings-form";
 import type { SettingsFormState } from "@/app/(app)/configuracion/actions";
-
-function fieldClass(hasError: boolean) {
-  return `w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-1 ${
-    hasError
-      ? "border-error focus:border-error focus:ring-error"
-      : "border-border focus:border-primary focus:ring-primary"
-  }`;
-}
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 export function NotificationSettingsForm({
   action,
@@ -26,81 +21,68 @@ export function NotificationSettingsForm({
   const succeeded = state?.ok === true;
 
   return (
-    <form
-      action={formAction}
-      className="max-w-xl space-y-6 rounded-lg border border-border bg-surface p-6"
-      noValidate
-    >
-      <div>
-        <h3 className="text-sm font-semibold text-foreground">Notificaciones</h3>
-        <p className="text-xs text-muted-foreground">
-          Preferencias de alertas y avisos del sistema.
-        </p>
-      </div>
+    <Card padding="md" className="max-w-xl">
+      <form action={formAction} className="space-y-4" noValidate>
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Notificaciones</h3>
+          <p className="text-xs text-muted-foreground">
+            Preferencias de alertas y avisos del sistema.
+          </p>
+        </div>
 
-      <div className="space-y-3">
-        <label className="flex items-center gap-2 text-sm text-foreground">
-          <input
-            type="checkbox"
-            name="notifyOnNewSale"
-            defaultChecked={settings.notifyOnNewSale}
-            disabled={pending}
-            className="size-4 rounded border-border accent-primary"
-          />
-          Notificar cuando se registre una nueva venta
-        </label>
+        <div className="space-y-3">
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              name="notifyOnNewSale"
+              defaultChecked={settings.notifyOnNewSale}
+              disabled={pending}
+              className="size-4 rounded border-border accent-primary"
+            />
+            Notificar cuando se registre una nueva venta
+          </label>
 
-        <label className="flex items-center gap-2 text-sm text-foreground">
-          <input
-            type="checkbox"
-            name="notifyOnPaymentDue"
-            defaultChecked={settings.notifyOnPaymentDue}
-            disabled={pending}
-            className="size-4 rounded border-border accent-primary"
-          />
-          Notificar cuando una cuota esté próxima a vencer
-        </label>
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              name="notifyOnPaymentDue"
+              defaultChecked={settings.notifyOnPaymentDue}
+              disabled={pending}
+              className="size-4 rounded border-border accent-primary"
+            />
+            Notificar cuando una cuota esté próxima a vencer
+          </label>
 
-        <label className="flex items-center gap-2 text-sm text-foreground">
-          <input
-            type="checkbox"
-            name="notifyOnOverduePayment"
-            defaultChecked={settings.notifyOnOverduePayment}
-            disabled={pending}
-            className="size-4 rounded border-border accent-primary"
-          />
-          Notificar cuando una cuota esté vencida
-        </label>
-      </div>
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              name="notifyOnOverduePayment"
+              defaultChecked={settings.notifyOnOverduePayment}
+              disabled={pending}
+              className="size-4 rounded border-border accent-primary"
+            />
+            Notificar cuando una cuota esté vencida
+          </label>
+        </div>
 
-      <div className="space-y-1">
-        <label htmlFor="reminderDaysBefore" className="text-sm font-medium text-foreground">
-          Días de anticipación para el recordatorio
-        </label>
-        <input
+        <Input
           id="reminderDaysBefore"
           name="reminderDaysBefore"
           type="number"
+          label="Días de anticipación para el recordatorio"
           min={0}
           defaultValue={settings.reminderDaysBefore}
           disabled={pending}
-          className={fieldClass(!!errors?.reminderDaysBefore)}
+          error={errors?.reminderDaysBefore}
         />
-        {errors?.reminderDaysBefore && (
-          <p className="text-sm text-error">{errors.reminderDaysBefore}</p>
-        )}
-      </div>
 
-      {formError && <p className="text-sm text-error">{formError}</p>}
-      {succeeded && <p className="text-sm text-success">Configuración guardada correctamente.</p>}
+        {formError && <p className="text-sm text-error">{formError}</p>}
+        {succeeded && <p className="text-sm text-success">Configuración guardada correctamente.</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-60"
-      >
-        {pending ? "Guardando…" : "Guardar cambios"}
-      </button>
-    </form>
+        <Button type="submit" disabled={pending} loading={pending}>
+          {pending ? "Guardando…" : "Guardar cambios"}
+        </Button>
+      </form>
+    </Card>
   );
 }

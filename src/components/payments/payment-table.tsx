@@ -4,6 +4,8 @@ import { PaymentMethod } from "@/generated/prisma/enums";
 import type { DecoratedPaymentListRow } from "@/server/services/payment-service";
 import { ValidationStatusBadge } from "@/components/payments/validation-status-badge";
 import { ReceiptLink } from "@/components/payments/receipt-link";
+import { UserAvatar } from "@/components/shared/user-avatar";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 
 const dateFormatter = new Intl.DateTimeFormat("es-EC", { dateStyle: "medium", timeZone: "UTC" });
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
@@ -25,67 +27,68 @@ const METHOD_LABELS: Record<PaymentMethod, string> = {
 // payment history.
 export function PaymentTable({ payments }: { payments: DecoratedPaymentListRow[] }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1280px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <th scope="col" className="px-4 py-3">Cliente</th>
-              <th scope="col" className="px-4 py-3">Producto</th>
-              <th scope="col" className="px-4 py-3">Vendedor</th>
-              <th scope="col" className="px-4 py-3">Cuota</th>
-              <th scope="col" className="px-4 py-3">Monto pagado</th>
-              <th scope="col" className="px-4 py-3">Forma de pago</th>
-              <th scope="col" className="px-4 py-3">Cuenta bancaria</th>
-              <th scope="col" className="px-4 py-3">Fecha</th>
-              <th scope="col" className="px-4 py-3">Estado</th>
-              <th scope="col" className="px-4 py-3">Registrado por</th>
-              <th scope="col" className="px-4 py-3">Voucher</th>
-              <th scope="col" className="px-4 py-3 text-right">Acción</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {payments.map((payment) => (
-              <tr key={payment.id} className="hover:bg-black/[0.02]">
-                <td className="px-4 py-3 font-medium text-foreground">
+    <Table className="min-w-[1280px]">
+      <TableHeader>
+        <tr>
+          <TableHead>Cliente</TableHead>
+          <TableHead>Producto</TableHead>
+          <TableHead>Vendedor</TableHead>
+          <TableHead>Cuota</TableHead>
+          <TableHead>Monto pagado</TableHead>
+          <TableHead>Forma de pago</TableHead>
+          <TableHead>Cuenta bancaria</TableHead>
+          <TableHead>Fecha</TableHead>
+          <TableHead>Estado</TableHead>
+          <TableHead>Registrado por</TableHead>
+          <TableHead>Voucher</TableHead>
+          <TableHead className="text-right">Acción</TableHead>
+        </tr>
+      </TableHeader>
+      <TableBody>
+        {payments.map((payment) => (
+          <TableRow key={payment.id}>
+            <TableCell>
+              <div className="flex items-center gap-3">
+                <UserAvatar name={payment.installment.sale.customer.fullName} size="sm" />
+                <span className="font-medium text-foreground">
                   {payment.installment.sale.customer.fullName}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{payment.installment.sale.product.name}</td>
-                <td className="px-4 py-3 text-muted-foreground">{payment.installment.sale.seller.name}</td>
-                <td className="px-4 py-3 text-muted-foreground">N.° {payment.installment.installmentNumber}</td>
-                <td className="px-4 py-3 font-semibold text-foreground">
-                  {currencyFormatter.format(Number(payment.amount))}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{METHOD_LABELS[payment.method]}</td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {payment.bankAccount ? `${payment.bankAccount.bankName} — ${payment.bankAccount.alias}` : "—"}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{dateFormatter.format(payment.paymentDate)}</td>
-                <td className="px-4 py-3">
-                  <ValidationStatusBadge status={payment.validationStatus} />
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{payment.registeredBy.name}</td>
-                <td className="px-4 py-3">
-                  {payment.receipt ? (
-                    <ReceiptLink fileUrl={payment.receipt.fileUrl} />
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <Link
-                    href={`/pagos/${payment.installment.id}`}
-                    className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
-                  >
-                    <Eye className="size-3.5" aria-hidden />
-                    Ver cuota
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+                </span>
+              </div>
+            </TableCell>
+            <TableCell className="text-muted-foreground">{payment.installment.sale.product.name}</TableCell>
+            <TableCell className="text-muted-foreground">{payment.installment.sale.seller.name}</TableCell>
+            <TableCell className="text-muted-foreground">N.° {payment.installment.installmentNumber}</TableCell>
+            <TableCell className="text-base font-semibold text-foreground">
+              {currencyFormatter.format(Number(payment.amount))}
+            </TableCell>
+            <TableCell className="text-muted-foreground">{METHOD_LABELS[payment.method]}</TableCell>
+            <TableCell className="text-muted-foreground">
+              {payment.bankAccount ? `${payment.bankAccount.bankName} — ${payment.bankAccount.alias}` : "—"}
+            </TableCell>
+            <TableCell className="text-muted-foreground">{dateFormatter.format(payment.paymentDate)}</TableCell>
+            <TableCell>
+              <ValidationStatusBadge status={payment.validationStatus} />
+            </TableCell>
+            <TableCell className="text-muted-foreground">{payment.registeredBy.name}</TableCell>
+            <TableCell>
+              {payment.receipt ? (
+                <ReceiptLink fileUrl={payment.receipt.fileUrl} />
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              )}
+            </TableCell>
+            <TableCell className="text-right">
+              <Link
+                href={`/pagos/${payment.installment.id}`}
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-soft"
+              >
+                <Eye className="size-3.5" aria-hidden />
+                Ver cuota
+              </Link>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

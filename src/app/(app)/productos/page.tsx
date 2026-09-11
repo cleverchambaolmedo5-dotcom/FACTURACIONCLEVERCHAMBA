@@ -7,6 +7,7 @@ import { ProductSearch } from "@/components/products/product-search";
 import { ProductFilters } from "@/components/products/product-filters";
 import { ProductTable } from "@/components/products/product-table";
 import { ProductEmptyState } from "@/components/products/product-empty-state";
+import { buttonVariants } from "@/components/ui/button";
 import { siteConfig } from "@/config/site";
 
 export const metadata: Metadata = { title: `Productos · ${siteConfig.name}` };
@@ -41,15 +42,12 @@ export default async function ProductosPage({
     <div className="flex flex-1 flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Productos</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-foreground">Productos</h2>
           <p className="text-sm text-muted-foreground">
             Gestiona el catálogo de cursos, mentorías y asesorías.
           </p>
         </div>
-        <Link
-          href="/productos/nuevo"
-          className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark"
-        >
+        <Link href="/productos/nuevo" className={buttonVariants()}>
           <Plus className="size-4" aria-hidden />
           Nuevo producto
         </Link>

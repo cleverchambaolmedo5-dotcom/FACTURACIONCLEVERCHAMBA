@@ -2,9 +2,14 @@
 
 import Link from "next/link";
 import { useActionState, useRef, useState } from "react";
+import { AlertTriangle, Eye, ShieldAlert } from "lucide-react";
 import { UserRole } from "@/generated/prisma/enums";
 import type { CustomerFormState } from "@/app/(app)/clientes/actions";
 import type { CustomerDuplicateCandidate } from "@/server/services/customer-service";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { UserAvatar } from "@/components/shared/user-avatar";
 
 export type CustomerFormAction = (
   state: CustomerFormState,
@@ -30,14 +35,6 @@ const EMPTY_DEFAULTS: CustomerFormDefaults = {
   address: "",
   assignedSellerId: "",
 };
-
-function fieldClass(hasError: boolean) {
-  return `w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-1 ${
-    hasError
-      ? "border-error focus:border-error focus:ring-error"
-      : "border-border focus:border-primary focus:ring-primary"
-  }`;
-}
 
 export function CustomerForm({
   action,
@@ -79,160 +76,134 @@ export function CustomerForm({
   return (
     <form ref={formRef} action={formAction} className="max-w-xl space-y-4" noValidate>
       <input type="hidden" name="confirmDuplicate" value={confirmDuplicate ? "true" : "false"} />
-      <div className="space-y-1">
-        <label htmlFor="fullName" className="text-sm font-medium text-foreground">
-          Nombre completo
-        </label>
-        <input
-          id="fullName"
-          name="fullName"
-          defaultValue={defaults.fullName}
-          disabled={pending}
-          className={fieldClass(!!errors?.fullName)}
-        />
-        {errors?.fullName && <p className="text-sm text-error">{errors.fullName}</p>}
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="identification" className="text-sm font-medium text-foreground">
-          Identificación (cédula / RUC){" "}
-          <span className="font-normal text-muted-foreground">(opcional)</span>
-        </label>
-        <input
-          id="identification"
-          name="identification"
-          defaultValue={defaults.identification}
-          disabled={pending}
-          className={fieldClass(!!errors?.identification)}
-        />
-        {errors?.identification && (
-          <p className="text-sm text-error">{errors.identification}</p>
-        )}
-      </div>
+      <Input
+        id="fullName"
+        name="fullName"
+        label="Nombre completo"
+        required
+        defaultValue={defaults.fullName}
+        disabled={pending}
+        error={errors?.fullName}
+      />
+
+      <Input
+        id="identification"
+        name="identification"
+        label="Identificación (cédula / RUC)"
+        helperText="Opcional."
+        defaultValue={defaults.identification}
+        disabled={pending}
+        error={errors?.identification}
+      />
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="phone" className="text-sm font-medium text-foreground">
-            Teléfono
-          </label>
-          <input
-            id="phone"
-            name="phone"
-            defaultValue={defaults.phone}
-            disabled={pending}
-            className={fieldClass(!!errors?.phone)}
-          />
-          {errors?.phone && <p className="text-sm text-error">{errors.phone}</p>}
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="country" className="text-sm font-medium text-foreground">
-            País
-          </label>
-          <input
-            id="country"
-            name="country"
-            defaultValue={defaults.country}
-            disabled={pending}
-            className={fieldClass(!!errors?.country)}
-          />
-          {errors?.country && <p className="text-sm text-error">{errors.country}</p>}
-        </div>
-      </div>
-
-      <div className="space-y-1">
-        <label htmlFor="email" className="text-sm font-medium text-foreground">
-          Email <span className="font-normal text-muted-foreground">(opcional)</span>
-        </label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          defaultValue={defaults.email}
+        <Input
+          id="phone"
+          name="phone"
+          label="Teléfono"
+          required
+          defaultValue={defaults.phone}
           disabled={pending}
-          className={fieldClass(!!errors?.email)}
+          error={errors?.phone}
         />
-        {errors?.email && <p className="text-sm text-error">{errors.email}</p>}
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="address" className="text-sm font-medium text-foreground">
-          Dirección <span className="font-normal text-muted-foreground">(opcional)</span>
-        </label>
-        <input
-          id="address"
-          name="address"
-          defaultValue={defaults.address}
+        <Input
+          id="country"
+          name="country"
+          label="País"
+          required
+          defaultValue={defaults.country}
           disabled={pending}
-          className={fieldClass(false)}
+          error={errors?.country}
         />
       </div>
 
-      <div className="space-y-1">
-        <label className="text-sm font-medium text-foreground">
-          Vendedor responsable
-        </label>
-        {canPickSeller ? (
-          <>
-            <select
-              name="assignedSellerId"
-              defaultValue={defaults.assignedSellerId}
-              disabled={pending}
-              className={fieldClass(!!errors?.assignedSellerId)}
-            >
-              <option value="" disabled>
-                Selecciona un vendedor…
-              </option>
-              {sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>
-                  {seller.name}
-                </option>
-              ))}
-            </select>
-            {errors?.assignedSellerId && (
-              <p className="text-sm text-error">{errors.assignedSellerId}</p>
-            )}
-          </>
-        ) : (
-          <p className="rounded-md border border-border bg-black/[0.02] px-3 py-2 text-sm text-muted-foreground">
+      <Input
+        id="email"
+        name="email"
+        type="email"
+        label="Email"
+        helperText="Opcional."
+        defaultValue={defaults.email}
+        disabled={pending}
+        error={errors?.email}
+      />
+
+      <Input
+        id="address"
+        name="address"
+        label="Dirección"
+        helperText="Opcional."
+        defaultValue={defaults.address}
+        disabled={pending}
+      />
+
+      {canPickSeller ? (
+        <Select
+          id="assignedSellerId"
+          name="assignedSellerId"
+          label="Vendedor responsable"
+          required
+          defaultValue={defaults.assignedSellerId}
+          disabled={pending}
+          error={errors?.assignedSellerId}
+        >
+          <option value="" disabled>
+            Selecciona un vendedor…
+          </option>
+          {sellers.map((seller) => (
+            <option key={seller.id} value={seller.id}>
+              {seller.name}
+            </option>
+          ))}
+        </Select>
+      ) : (
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium text-foreground">Vendedor responsable</label>
+          <p className="rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
             Se te asignará automáticamente a ti ({currentUserName}).
           </p>
-        )}
-      </div>
+        </div>
+      )}
 
-      {formError && <p className="text-sm text-error">{formError}</p>}
+      {formError && !duplicate && <p className="text-sm text-error">{formError}</p>}
 
       {duplicate?.kind === "blocked" && (
-        <div className="space-y-3 rounded-md border border-error/40 bg-error/5 p-3">
-          <DuplicateCandidateCard customer={duplicate.customer} />
+        <div className="flex gap-3 rounded-lg border border-error/30 bg-error-soft p-4">
+          <ShieldAlert className="mt-0.5 size-5 shrink-0 text-error" aria-hidden />
+          <div className="min-w-0 flex-1 space-y-3">
+            <p className="text-sm font-semibold text-error">{formError}</p>
+            <DuplicateCandidateCard customer={duplicate.customer} />
+          </div>
         </div>
       )}
 
       {duplicate?.kind === "warning" && (
-        <div className="space-y-3 rounded-md border border-border bg-black/[0.02] p-3">
-          <div className="space-y-2">
-            {duplicate.customers.map((customer) => (
-              <DuplicateCandidateCard key={customer.id} customer={customer} />
-            ))}
+        <div className="flex gap-3 rounded-lg border border-warning/30 bg-warning-soft p-4">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-warning" aria-hidden />
+          <div className="min-w-0 flex-1 space-y-3">
+            <p className="text-sm font-semibold text-foreground">{formError}</p>
+            <div className="space-y-2">
+              {duplicate.customers.map((customer) => (
+                <DuplicateCandidateCard key={customer.id} customer={customer} />
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={handleContinueAnyway}
+              disabled={pending}
+              className="text-sm font-medium text-primary hover:underline disabled:opacity-60"
+            >
+              Continuar con nuevo cliente de todos modos
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleContinueAnyway}
-            disabled={pending}
-            className="text-sm font-medium text-primary hover:underline disabled:opacity-60"
-          >
-            Continuar con nuevo cliente de todos modos
-          </button>
         </div>
       )}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-60"
-      >
+      <Button type="submit" disabled={pending} loading={pending}>
         {pending ? "Guardando…" : submitLabel}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -240,18 +211,22 @@ export function CustomerForm({
 function DuplicateCandidateCard({ customer }: { customer: CustomerDuplicateCandidate }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-foreground">{customer.fullName}</p>
-        <p className="truncate text-xs text-muted-foreground">
-          {customer.identification ? `${customer.identification} · ` : ""}
-          {customer.phone}
-          {customer.email ? ` · ${customer.email}` : ""}
-        </p>
+      <div className="flex min-w-0 items-center gap-2.5">
+        <UserAvatar name={customer.fullName} size="sm" />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-foreground">{customer.fullName}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {customer.identification ? `${customer.identification} · ` : ""}
+            {customer.phone}
+            {customer.email ? ` · ${customer.email}` : ""}
+          </p>
+        </div>
       </div>
       <Link
         href={`/clientes/${customer.id}/editar`}
-        className="shrink-0 text-sm font-medium text-primary hover:underline"
+        className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-primary hover:underline"
       >
+        <Eye className="size-3.5" aria-hidden />
         Ver cliente
       </Link>
     </div>

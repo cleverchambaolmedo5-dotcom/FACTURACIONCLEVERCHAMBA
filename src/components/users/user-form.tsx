@@ -5,6 +5,10 @@ import { UserRole, UserStatus } from "@/generated/prisma/enums";
 import { ROLE_LABELS } from "@/lib/auth/rbac";
 import { USER_STATUS_LABELS } from "./user-status-badge";
 import type { ManagedUserFormState } from "@/app/(app)/usuarios/actions";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 export type UserFormAction = (
   state: ManagedUserFormState,
@@ -25,17 +29,9 @@ const EMPTY_DEFAULTS: UserFormDefaults = {
   status: UserStatus.ACTIVE,
 };
 
-function fieldClass(hasError: boolean) {
-  return `w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-1 ${
-    hasError
-      ? "border-error focus:border-error focus:ring-error"
-      : "border-border focus:border-primary focus:ring-primary"
-  }`;
-}
-
 /**
  * Shared create/edit form for the Usuarios module, mirroring
- * CustomerForm's structure (src/components/customers/customer-form.tsx).
+ * ProductForm/CustomerForm's structure (src/components/products/product-form.tsx).
  * `mode="create"` requires a password; `mode="edit"` makes it optional
  * (leave blank to keep the current one -- see
  * user-management-service.ts#updateUserForAdmin) and additionally shows
@@ -64,132 +60,96 @@ export function UserForm({
   const formError = state && !state.ok ? state.formError : undefined;
 
   return (
-    <form action={formAction} className="max-w-xl space-y-4" noValidate>
-      <div className="space-y-1">
-        <label htmlFor="name" className="text-sm font-medium text-foreground">
-          Nombre completo
-        </label>
-        <input
+    <Card padding="md" className="max-w-xl">
+      <form action={formAction} className="space-y-4" noValidate>
+        <Input
           id="name"
           name="name"
+          label="Nombre completo"
+          required
           defaultValue={defaults.name}
           disabled={pending}
-          className={fieldClass(!!errors?.name)}
+          error={errors?.name}
         />
-        {errors?.name && <p className="text-sm text-error">{errors.name}</p>}
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="email" className="text-sm font-medium text-foreground">
-          Usuario
-        </label>
-        <input
+        <Input
           id="email"
           name="email"
           type="email"
+          label="Usuario"
+          required
           autoComplete="username"
           defaultValue={defaults.email}
           disabled={pending}
-          className={fieldClass(!!errors?.email)}
+          error={errors?.email}
         />
-        {errors?.email && <p className="text-sm text-error">{errors.email}</p>}
-      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="password" className="text-sm font-medium text-foreground">
-            {mode === "create" ? "Contraseña" : (
-              <>
-                Contraseña <span className="font-normal text-muted-foreground">(opcional)</span>
-              </>
-            )}
-          </label>
-          <input
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
             id="password"
             name="password"
             type="password"
+            label={mode === "create" ? "Contraseña" : "Contraseña (opcional)"}
+            required={mode === "create"}
             autoComplete="new-password"
             disabled={pending}
             placeholder={mode === "edit" ? "Dejar en blanco para conservarla" : undefined}
-            className={fieldClass(!!errors?.password)}
+            error={errors?.password}
           />
-          {errors?.password && <p className="text-sm text-error">{errors.password}</p>}
-        </div>
 
-        <div className="space-y-1">
-          <label htmlFor="confirmPassword" className="text-sm font-medium text-foreground">
-            Confirmar contraseña
-          </label>
-          <input
+          <Input
             id="confirmPassword"
             name="confirmPassword"
             type="password"
+            label="Confirmar contraseña"
             autoComplete="new-password"
             disabled={pending}
-            className={fieldClass(!!errors?.confirmPassword)}
+            error={errors?.confirmPassword}
           />
-          {errors?.confirmPassword && (
-            <p className="text-sm text-error">{errors.confirmPassword}</p>
-          )}
         </div>
-      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="role" className="text-sm font-medium text-foreground">
-            Rol
-          </label>
-          <select
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Select
             id="role"
             name="role"
+            label="Rol"
+            required
             defaultValue={defaults.role}
             disabled={pending}
-            className={fieldClass(!!errors?.role)}
+            error={errors?.role}
           >
             {Object.values(UserRole).map((role) => (
               <option key={role} value={role}>
                 {ROLE_LABELS[role]}
               </option>
             ))}
-          </select>
-          {errors?.role && <p className="text-sm text-error">{errors.role}</p>}
-        </div>
+          </Select>
 
-        {mode === "edit" && (
-          <div className="space-y-1">
-            <label htmlFor="status" className="text-sm font-medium text-foreground">
-              Estado
-            </label>
-            <select
+          {mode === "edit" && (
+            <Select
               id="status"
               name="status"
+              label="Estado"
               defaultValue={defaults.status}
               disabled={pending}
-              className={fieldClass(!!errors?.status)}
+              error={errors?.status}
+              helperText={isSelf ? "No puedes desactivar tu propia cuenta." : undefined}
             >
               {Object.values(UserStatus).map((status) => (
                 <option key={status} value={status} disabled={isSelf && status === UserStatus.INACTIVE}>
                   {USER_STATUS_LABELS[status]}
                 </option>
               ))}
-            </select>
-            {errors?.status && <p className="text-sm text-error">{errors.status}</p>}
-            {isSelf && (
-              <p className="text-xs text-muted-foreground">No puedes desactivar tu propia cuenta.</p>
-            )}
-          </div>
-        )}
-      </div>
+            </Select>
+          )}
+        </div>
 
-      {formError && <p className="text-sm text-error">{formError}</p>}
+        {formError && <p className="text-sm text-error">{formError}</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-60"
-      >
-        {pending ? "Guardando…" : submitLabel}
-      </button>
-    </form>
+        <Button type="submit" disabled={pending} loading={pending}>
+          {pending ? "Guardando…" : submitLabel}
+        </Button>
+      </form>
+    </Card>
   );
 }

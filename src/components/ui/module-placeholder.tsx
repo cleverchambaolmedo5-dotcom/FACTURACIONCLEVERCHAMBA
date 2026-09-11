@@ -21,7 +21,7 @@ export function ModulePlaceholder({
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-lg border border-border bg-surface px-6 py-20 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+      <div className="flex size-12 items-center justify-center rounded-full bg-primary-soft text-primary">
         <Icon className="size-6" aria-hidden />
       </div>
       <div className="space-y-1.5">

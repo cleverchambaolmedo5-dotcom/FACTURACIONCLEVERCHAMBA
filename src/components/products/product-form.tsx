@@ -3,6 +3,11 @@
 import { useActionState } from "react";
 import { ProductType } from "@/generated/prisma/enums";
 import type { ProductFormState } from "@/app/(app)/productos/actions";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 export type ProductFormAction = (
   state: ProductFormState,
@@ -37,14 +42,6 @@ const PRODUCT_TYPE_LABELS: Record<ProductType, string> = {
   CONSULTING: "Asesoría",
 };
 
-function fieldClass(hasError: boolean) {
-  return `w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-1 ${
-    hasError
-      ? "border-error focus:border-error focus:ring-error"
-      : "border-border focus:border-primary focus:ring-primary"
-  }`;
-}
-
 /**
  * Shared create/edit form for the Productos module, mirroring
  * CustomerForm/UserForm's structure. `mode="edit"` additionally shows the
@@ -70,122 +67,95 @@ export function ProductForm({
   const formError = state && !state.ok ? state.formError : undefined;
 
   return (
-    <form action={formAction} className="max-w-xl space-y-4" noValidate>
-      <div className="space-y-1">
-        <label htmlFor="name" className="text-sm font-medium text-foreground">
-          Nombre
-        </label>
-        <input
+    <Card padding="md" className="max-w-xl">
+      <form action={formAction} className="space-y-4" noValidate>
+        <Input
           id="name"
           name="name"
+          label="Nombre"
+          required
           defaultValue={defaults.name}
           disabled={pending}
-          className={fieldClass(!!errors?.name)}
+          error={errors?.name}
         />
-        {errors?.name && <p className="text-sm text-error">{errors.name}</p>}
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="description" className="text-sm font-medium text-foreground">
-          Descripción <span className="font-normal text-muted-foreground">(opcional)</span>
-        </label>
-        <textarea
+        <Textarea
           id="description"
           name="description"
+          label="Descripción"
+          helperText="Opcional."
           rows={3}
           defaultValue={defaults.description}
           disabled={pending}
-          className={fieldClass(false)}
         />
-      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="officialPrice" className="text-sm font-medium text-foreground">
-            Precio
-          </label>
-          <input
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
             id="officialPrice"
             name="officialPrice"
             type="number"
+            label="Precio"
+            required
             min="0.01"
             step="0.01"
             defaultValue={defaults.officialPrice}
             disabled={pending}
-            className={fieldClass(!!errors?.officialPrice)}
+            error={errors?.officialPrice}
+            helperText={
+              mode === "edit" && !errors?.officialPrice
+                ? "Solo afecta a nuevas ventas; las ventas ya registradas conservan su precio histórico."
+                : undefined
+            }
           />
-          {errors?.officialPrice && <p className="text-sm text-error">{errors.officialPrice}</p>}
-          {mode === "edit" && (
-            <p className="text-xs text-muted-foreground">
-              Solo afecta a nuevas ventas; las ventas ya registradas conservan su precio histórico.
-            </p>
-          )}
-        </div>
 
-        <div className="space-y-1">
-          <label htmlFor="currency" className="text-sm font-medium text-foreground">
-            Moneda
-          </label>
-          <input
+          <Input
             id="currency"
             name="currency"
+            label="Moneda"
+            required
             defaultValue={defaults.currency}
             disabled={pending}
-            className={fieldClass(!!errors?.currency)}
+            error={errors?.currency}
           />
-          {errors?.currency && <p className="text-sm text-error">{errors.currency}</p>}
         </div>
-      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="type" className="text-sm font-medium text-foreground">
-            Tipo
-          </label>
-          <select
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Select
             id="type"
             name="type"
+            label="Tipo"
+            required
             defaultValue={defaults.type}
             disabled={pending}
-            className={fieldClass(!!errors?.type)}
+            error={errors?.type}
           >
             {Object.values(ProductType).map((type) => (
               <option key={type} value={type}>
                 {PRODUCT_TYPE_LABELS[type]}
               </option>
             ))}
-          </select>
-          {errors?.type && <p className="text-sm text-error">{errors.type}</p>}
-        </div>
+          </Select>
 
-        {mode === "edit" && (
-          <div className="space-y-1">
-            <label htmlFor="active" className="text-sm font-medium text-foreground">
-              Estado
-            </label>
-            <select
+          {mode === "edit" && (
+            <Select
               id="active"
               name="active"
+              label="Estado"
               defaultValue={defaults.active ? "true" : "false"}
               disabled={pending}
-              className={fieldClass(false)}
             >
               <option value="true">Activo</option>
               <option value="false">Inactivo</option>
-            </select>
-          </div>
-        )}
-      </div>
+            </Select>
+          )}
+        </div>
 
-      {formError && <p className="text-sm text-error">{formError}</p>}
+        {formError && <p className="text-sm text-error">{formError}</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-60"
-      >
-        {pending ? "Guardando…" : submitLabel}
-      </button>
-    </form>
+        <Button type="submit" disabled={pending} loading={pending}>
+          {pending ? "Guardando…" : submitLabel}
+        </Button>
+      </form>
+    </Card>
   );
 }

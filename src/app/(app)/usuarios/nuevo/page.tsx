@@ -12,7 +12,7 @@ export default async function NuevoUsuarioPage() {
   return (
     <div className="flex flex-1 flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Nuevo usuario</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">Nuevo usuario</h2>
         <p className="text-sm text-muted-foreground">
           Completa los datos para registrar un nuevo usuario interno. Se crea activo por defecto.
         </p>

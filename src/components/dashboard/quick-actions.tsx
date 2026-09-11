@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
 
 export type QuickAction = { href: string; label: string; icon: LucideIcon };
 
@@ -10,7 +11,7 @@ export function QuickActions({ actions }: { actions: QuickAction[] }) {
         <Link
           key={`${action.href}-${action.label}`}
           href={action.href}
-          className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-black/[0.03]"
+          className={buttonVariants({ variant: "secondary", size: "md" })}
         >
           <action.icon className="size-4 text-primary" aria-hidden />
           {action.label}

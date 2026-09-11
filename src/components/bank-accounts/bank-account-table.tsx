@@ -5,6 +5,7 @@ import type { BankAccountListItem } from "@/server/repositories/bank-account-rep
 import { BankAccountStatusBadge } from "./bank-account-status-badge";
 import { BankAccountToggleStatusButton } from "./bank-account-toggle-status-button";
 import { BankAccountDeleteButton } from "./bank-account-delete-button";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 
 const dateFormatter = new Intl.DateTimeFormat("es-EC", { dateStyle: "medium" });
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
@@ -34,67 +35,61 @@ export function BankAccountTable({
   const canManage = currentUserRole === UserRole.ADMIN;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[960px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <th scope="col" className="px-4 py-3">Banco</th>
-              <th scope="col" className="px-4 py-3">Alias</th>
-              <th scope="col" className="px-4 py-3">Titular</th>
-              <th scope="col" className="px-4 py-3">Número de cuenta</th>
-              <th scope="col" className="px-4 py-3">Tipo</th>
-              <th scope="col" className="px-4 py-3">Moneda</th>
-              <th scope="col" className="px-4 py-3 text-right">Saldo</th>
-              <th scope="col" className="px-4 py-3">Estado</th>
-              <th scope="col" className="px-4 py-3">Fecha de creación</th>
-              {canManage && <th scope="col" className="px-4 py-3 text-right">Acciones</th>}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {bankAccounts.map((account) => (
-              <tr key={account.id} className="hover:bg-black/[0.02]">
-                <td className="px-4 py-3 font-medium text-foreground">
-                  <Link href={`/cuentas-bancarias/${account.id}`} className="hover:underline">
-                    {account.bankName}
+    <Table className="min-w-[960px]">
+      <TableHeader>
+        <tr>
+          <TableHead>Banco</TableHead>
+          <TableHead>Alias</TableHead>
+          <TableHead>Titular</TableHead>
+          <TableHead>Número de cuenta</TableHead>
+          <TableHead>Tipo</TableHead>
+          <TableHead>Moneda</TableHead>
+          <TableHead className="text-right">Saldo</TableHead>
+          <TableHead>Estado</TableHead>
+          <TableHead>Fecha de creación</TableHead>
+          {canManage && <TableHead className="text-right">Acciones</TableHead>}
+        </tr>
+      </TableHeader>
+      <TableBody>
+        {bankAccounts.map((account) => (
+          <TableRow key={account.id}>
+            <TableCell className="font-medium text-foreground">
+              <Link href={`/cuentas-bancarias/${account.id}`} className="hover:underline">
+                {account.bankName}
+              </Link>
+            </TableCell>
+            <TableCell className="text-muted-foreground">{account.alias}</TableCell>
+            <TableCell className="text-muted-foreground">{account.accountHolder}</TableCell>
+            <TableCell className="font-mono text-muted-foreground">
+              {maskAccountNumber(account.accountNumber)}
+            </TableCell>
+            <TableCell className="text-muted-foreground">{account.accountType}</TableCell>
+            <TableCell className="text-muted-foreground">{account.currency}</TableCell>
+            <TableCell className="text-right font-semibold text-foreground">
+              {currencyFormatter.format(Number(account.balance))}
+            </TableCell>
+            <TableCell>
+              <BankAccountStatusBadge active={account.active} />
+            </TableCell>
+            <TableCell className="text-muted-foreground">{dateFormatter.format(account.createdAt)}</TableCell>
+            {canManage && (
+              <TableCell className="text-right">
+                <div className="inline-flex items-center justify-end gap-1">
+                  <Link
+                    href={`/cuentas-bancarias/${account.id}/editar`}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-soft"
+                  >
+                    <Pencil className="size-3.5" aria-hidden />
+                    Editar
                   </Link>
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{account.alias}</td>
-                <td className="px-4 py-3 text-muted-foreground">{account.accountHolder}</td>
-                <td className="px-4 py-3 font-mono text-muted-foreground">
-                  {maskAccountNumber(account.accountNumber)}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{account.accountType}</td>
-                <td className="px-4 py-3 text-muted-foreground">{account.currency}</td>
-                <td className="px-4 py-3 text-right font-medium text-foreground">
-                  {currencyFormatter.format(Number(account.balance))}
-                </td>
-                <td className="px-4 py-3">
-                  <BankAccountStatusBadge active={account.active} />
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {dateFormatter.format(account.createdAt)}
-                </td>
-                {canManage && (
-                  <td className="px-4 py-3 text-right">
-                    <div className="inline-flex items-center justify-end gap-1">
-                      <Link
-                        href={`/cuentas-bancarias/${account.id}/editar`}
-                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
-                      >
-                        <Pencil className="size-3.5" aria-hidden />
-                        Editar
-                      </Link>
-                      <BankAccountToggleStatusButton bankAccountId={account.id} active={account.active} />
-                      <BankAccountDeleteButton bankAccountId={account.id} active={account.active} />
-                    </div>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+                  <BankAccountToggleStatusButton bankAccountId={account.id} active={account.active} />
+                  <BankAccountDeleteButton bankAccountId={account.id} active={account.active} />
+                </div>
+              </TableCell>
+            )}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

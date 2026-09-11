@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Eye } from "lucide-react";
 import type { OverdueInstallmentItem } from "@/server/services/dashboard-service";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 
 const dateFormatter = new Intl.DateTimeFormat("es-EC", { dateStyle: "medium", timeZone: "UTC" });
 const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", currency: "USD" });
@@ -13,45 +14,41 @@ const currencyFormatter = new Intl.NumberFormat("es-EC", { style: "currency", cu
 // whole sale.
 export function OverdueInstallmentsTable({ installments }: { installments: OverdueInstallmentItem[] }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <th scope="col" className="px-4 py-3">Cliente</th>
-              <th scope="col" className="px-4 py-3">Producto</th>
-              <th scope="col" className="px-4 py-3">Cuota</th>
-              <th scope="col" className="px-4 py-3">Monto pendiente</th>
-              <th scope="col" className="px-4 py-3">Vencimiento</th>
-              <th scope="col" className="px-4 py-3">Días vencidos</th>
-              <th scope="col" className="px-4 py-3 text-right">Acciones</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {installments.map((installment) => (
-              <tr key={installment.id} className="hover:bg-black/[0.02]">
-                <td className="px-4 py-3 font-medium text-foreground">{installment.customerName}</td>
-                <td className="px-4 py-3 text-muted-foreground">{installment.productName}</td>
-                <td className="px-4 py-3 text-muted-foreground">N.° {installment.installmentNumber}</td>
-                <td className="px-4 py-3 font-semibold text-error">
-                  {currencyFormatter.format(installment.balanceCents / 100)}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{dateFormatter.format(installment.dueDate)}</td>
-                <td className="px-4 py-3 text-muted-foreground">{installment.daysOverdue}</td>
-                <td className="px-4 py-3 text-right">
-                  <Link
-                    href={`/ventas/${installment.saleId}`}
-                    className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
-                  >
-                    <Eye className="size-3.5" aria-hidden />
-                    Ver
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <Table className="min-w-[860px]">
+      <TableHeader>
+        <tr>
+          <TableHead>Cliente</TableHead>
+          <TableHead>Producto</TableHead>
+          <TableHead>Cuota</TableHead>
+          <TableHead>Monto pendiente</TableHead>
+          <TableHead>Vencimiento</TableHead>
+          <TableHead>Días vencidos</TableHead>
+          <TableHead className="text-right">Acciones</TableHead>
+        </tr>
+      </TableHeader>
+      <TableBody>
+        {installments.map((installment) => (
+          <TableRow key={installment.id}>
+            <TableCell className="font-medium text-foreground">{installment.customerName}</TableCell>
+            <TableCell className="text-muted-foreground">{installment.productName}</TableCell>
+            <TableCell className="text-muted-foreground">N.° {installment.installmentNumber}</TableCell>
+            <TableCell className="font-semibold text-error">
+              {currencyFormatter.format(installment.balanceCents / 100)}
+            </TableCell>
+            <TableCell className="text-muted-foreground">{dateFormatter.format(installment.dueDate)}</TableCell>
+            <TableCell className="text-muted-foreground">{installment.daysOverdue}</TableCell>
+            <TableCell className="text-right">
+              <Link
+                href={`/ventas/${installment.saleId}`}
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary-soft"
+              >
+                <Eye className="size-3.5" aria-hidden />
+                Ver
+              </Link>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

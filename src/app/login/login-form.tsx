@@ -14,7 +14,7 @@ export function LoginForm({ module }: { module?: string }) {
     <form action={formAction} className="space-y-5" noValidate>
       {module && <input type="hidden" name="module" value={module} />}
       <div className="space-y-1.5">
-        <label htmlFor="email" className="text-sm font-medium text-[#1e293b]">
+        <label htmlFor="email" className="text-sm font-medium text-foreground">
           Correo electrónico
         </label>
         <input
@@ -24,12 +24,12 @@ export function LoginForm({ module }: { module?: string }) {
           autoComplete="email"
           required
           disabled={pending}
-          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-[#1e293b] outline-none transition-colors duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+          className="w-full rounded-xl border border-border bg-white px-4 py-2.5 text-sm text-foreground outline-none transition-colors duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
         />
       </div>
 
       <div className="space-y-1.5">
-        <label htmlFor="password" className="text-sm font-medium text-[#1e293b]">
+        <label htmlFor="password" className="text-sm font-medium text-foreground">
           Contraseña
         </label>
         <input
@@ -39,12 +39,12 @@ export function LoginForm({ module }: { module?: string }) {
           autoComplete="current-password"
           required
           disabled={pending}
-          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-[#1e293b] outline-none transition-colors duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+          className="w-full rounded-xl border border-border bg-white px-4 py-2.5 text-sm text-foreground outline-none transition-colors duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
         />
       </div>
 
       {state?.error && (
-        <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-error">
+        <p role="alert" className="rounded-lg bg-error-soft px-3 py-2 text-sm text-error">
           {state.error}
         </p>
       )}

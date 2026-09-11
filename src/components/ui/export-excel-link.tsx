@@ -11,7 +11,7 @@ export function ExportExcelLink({ href, label = "Exportar a Excel" }: { href: st
   return (
     <a
       href={href}
-      className="inline-flex items-center justify-center gap-2 rounded-md border border-success/30 bg-success/10 px-4 py-2 text-sm font-medium text-success transition-colors hover:bg-success/20"
+      className="inline-flex items-center justify-center gap-2 rounded-md border border-success/30 bg-success-soft px-4 py-2 text-sm font-medium text-success transition-colors hover:opacity-90"
     >
       <FileSpreadsheet className="size-4" aria-hidden />
       {label}

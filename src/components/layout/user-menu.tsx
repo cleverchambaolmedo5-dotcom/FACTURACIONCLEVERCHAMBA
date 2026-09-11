@@ -39,7 +39,7 @@ export function UserMenu({ user }: { user: PublicUser }) {
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-haspopup="menu"
-        className="flex items-center gap-2 rounded-md p-1.5 pr-2 text-left transition-colors hover:bg-black/5"
+        className="flex items-center gap-2 rounded-md p-1.5 pr-2 text-left transition-colors hover:bg-primary-soft"
       >
         <UserIdentity user={user} />
         <ChevronDown
@@ -54,7 +54,7 @@ export function UserMenu({ user }: { user: PublicUser }) {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 z-20 mt-2 w-56 rounded-md border border-border bg-surface py-1 shadow-md"
+          className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-border bg-surface py-1 shadow-modal"
         >
           <div className="border-b border-border px-3 py-2">
             <UserIdentity user={user} />
@@ -68,9 +68,9 @@ export function UserMenu({ user }: { user: PublicUser }) {
                 setOpen(false);
                 setModulesModalOpen(true);
               }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-black/5"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-primary-soft"
             >
-              <LayoutGrid className="size-4" aria-hidden />
+              <LayoutGrid className="size-4 text-muted-foreground" aria-hidden />
               Módulos
             </button>
           </div>
@@ -80,18 +80,18 @@ export function UserMenu({ user }: { user: PublicUser }) {
               href="/perfil"
               role="menuitem"
               onClick={() => setOpen(false)}
-              className="flex items-center gap-2 px-3 py-2 text-sm text-foreground transition-colors hover:bg-black/5"
+              className="flex items-center gap-2 px-3 py-2 text-sm text-foreground transition-colors hover:bg-primary-soft"
             >
-              <UserRound className="size-4" aria-hidden />
+              <UserRound className="size-4 text-muted-foreground" aria-hidden />
               Mi perfil
             </Link>
             <Link
               href="/perfil#seguridad"
               role="menuitem"
               onClick={() => setOpen(false)}
-              className="flex items-center gap-2 px-3 py-2 text-sm text-foreground transition-colors hover:bg-black/5"
+              className="flex items-center gap-2 px-3 py-2 text-sm text-foreground transition-colors hover:bg-primary-soft"
             >
-              <KeyRound className="size-4" aria-hidden />
+              <KeyRound className="size-4 text-muted-foreground" aria-hidden />
               Cambiar contraseña
             </Link>
           </div>
@@ -100,7 +100,7 @@ export function UserMenu({ user }: { user: PublicUser }) {
             <button
               type="submit"
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-error transition-colors hover:bg-error/10"
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-error transition-colors hover:bg-error-soft"
             >
               <LogOut className="size-4" aria-hidden />
               Cerrar sesión

@@ -34,7 +34,7 @@ export function BankAccountToggleStatusButton({
         onClick={handleClick}
         disabled={pending}
         className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-          active ? "text-error hover:bg-error/10" : "text-success hover:bg-success/10"
+          active ? "text-error hover:bg-error-soft" : "text-success hover:bg-success-soft"
         }`}
       >
         {active ? <PowerOff className="size-3.5" aria-hidden /> : <Power className="size-3.5" aria-hidden />}

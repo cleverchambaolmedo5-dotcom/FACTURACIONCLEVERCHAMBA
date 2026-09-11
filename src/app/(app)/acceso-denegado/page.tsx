@@ -10,6 +10,7 @@ import {
   type ModuleContext,
 } from "@/config/navigation";
 import { siteConfig } from "@/config/site";
+import { buttonVariants } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: `Acceso denegado · ${siteConfig.name}` };
 
@@ -44,7 +45,7 @@ export default async function AccesoDenegadoPage() {
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-error/10 text-error">
+      <div className="flex size-12 items-center justify-center rounded-full bg-error-soft text-error">
         <ShieldAlert className="size-6" aria-hidden />
       </div>
       <div className="space-y-1.5">
@@ -53,10 +54,7 @@ export default async function AccesoDenegadoPage() {
           Tu rol no tiene permiso para ver esta sección.
         </p>
       </div>
-      <Link
-        href={dashboard.href}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark"
-      >
+      <Link href={dashboard.href} className={buttonVariants()}>
         Volver a {dashboard.label}
       </Link>
     </div>

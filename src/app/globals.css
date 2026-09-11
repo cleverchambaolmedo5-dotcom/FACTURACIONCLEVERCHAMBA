@@ -2,10 +2,18 @@
 
 /*
  * Design tokens. Raw values live here as plain custom properties; the
- * `@theme inline` block below aliases them to `--color-*` names so
- * Tailwind generates utilities from them (e.g. `bg-primary`,
- * `text-sidebar-foreground`). Components must consume these utilities
- * instead of hardcoding hex values.
+ * `@theme inline` block below aliases them to `--color-*` (and
+ * `--shadow-*`) names so Tailwind generates utilities from them (e.g.
+ * `bg-primary`, `text-sidebar-foreground`, `shadow-card`). Components must
+ * consume these utilities instead of hardcoding hex values.
+ *
+ * Every token name that existed before this SaaS/fintech redesign pass
+ * (--background, --foreground, --surface, --border, --muted-foreground,
+ * --primary, --primary-dark, --sidebar*, --success/--warning/--error) is
+ * kept and still resolves to a utility of the same name -- only the
+ * underlying values and a few additions changed, so existing components
+ * that already consume those utilities pick up the new look automatically
+ * without being touched.
  */
 :root {
   --background: #f8fafc;
@@ -16,18 +24,57 @@
 
   --muted-foreground: #64748b;
 
+  /* Navy: the two brand darks, used by the sidebar (principal = base,
+     secundario = hover/active surface on top of it) and anywhere else a
+     "dark brand" surface is needed. */
+  --navy: #0b1736;
+  --navy-secondary: #0f1f46;
+
+  /* Electric blue: the single action/branding color. Kept under both the
+     pre-existing --brand-primary* names (consumed by bg-primary etc.
+     across the whole app already) and the new --electric-blue* names so
+     new components can reach for whichever reads better in context. */
   --brand-primary: #2563eb;
   --brand-primary-dark: #1d4ed8;
   --brand-primary-foreground: #ffffff;
+  --electric-blue: var(--brand-primary);
+  --electric-blue-dark: var(--brand-primary-dark);
 
-  --sidebar: #0f172a;
+  /* Soft blue surfaces (selected rows, info banners, subtle chips) --
+     these also happen to match Tailwind's built-in blue-50/blue-100, so
+     `bg-blue-50`/`bg-blue-100` work too, but a semantic name keeps
+     component code from hardcoding a raw palette step. */
+  --blue-50: #eff6ff;
+  --blue-100: #dbeafe;
+  --primary-soft: var(--blue-50);
+  --primary-soft-strong: var(--blue-100);
+
+  --sidebar: var(--navy);
   --sidebar-foreground: #e2e8f0;
-  --sidebar-border: #1e293b;
-  --sidebar-accent: #1e293b;
+  --sidebar-border: #1b2a52;
+  --sidebar-accent: var(--navy-secondary);
 
   --status-success: #16a34a;
-  --status-warning: #f59e0b;
+  --status-success-soft: #f0fdf4;
+  --status-warning: #d97706;
+  --status-warning-soft: #fffbeb;
   --status-error: #dc2626;
+  --status-error-soft: #fef2f2;
+  --status-info: var(--brand-primary);
+  --status-info-soft: var(--blue-50);
+
+  /* Neutral row hover for data tables -- deliberately NOT a blue tint.
+     Electric blue is reserved for actions/links/active state/focus, not
+     for a plain "you're hovering a row" affordance. Same value as
+     --background (Tailwind's slate-50) but named separately so tuning one
+     never accidentally tunes the other. */
+  --row-hover: #f8fafc;
+
+  /* Very light, layered shadows -- never the default Tailwind "shadow-lg"
+     weight. Cards get the lighter one, elevated surfaces (modals,
+     dropdowns) get the slightly stronger one. */
+  --shadow-card-value: 0 1px 2px 0 rgb(15 23 42 / 0.04), 0 1px 3px -1px rgb(15 23 42 / 0.06);
+  --shadow-modal-value: 0 10px 15px -3px rgb(15 23 42 / 0.08), 0 4px 6px -4px rgb(15 23 42 / 0.06);
 }
 
 @theme inline {
@@ -42,6 +89,11 @@
   --color-primary: var(--brand-primary);
   --color-primary-dark: var(--brand-primary-dark);
   --color-primary-foreground: var(--brand-primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-soft-strong: var(--primary-soft-strong);
+
+  --color-navy: var(--navy);
+  --color-navy-secondary: var(--navy-secondary);
 
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
@@ -49,8 +101,18 @@
   --color-sidebar-accent: var(--sidebar-accent);
 
   --color-success: var(--status-success);
+  --color-success-soft: var(--status-success-soft);
   --color-warning: var(--status-warning);
+  --color-warning-soft: var(--status-warning-soft);
   --color-error: var(--status-error);
+  --color-error-soft: var(--status-error-soft);
+  --color-info: var(--status-info);
+  --color-info-soft: var(--status-info-soft);
+
+  --color-row-hover: var(--row-hover);
+
+  --shadow-card: var(--shadow-card-value);
+  --shadow-modal: var(--shadow-modal-value);
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);

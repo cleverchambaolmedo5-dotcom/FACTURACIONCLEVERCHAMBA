@@ -42,7 +42,7 @@ export default async function ComprobantesPage({
   return (
     <div className="flex flex-1 flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Comprobantes</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">Comprobantes</h2>
         <p className="text-sm text-muted-foreground">
           Pagos registrados con su comprobante, listos para aprobar o rechazar.
         </p>

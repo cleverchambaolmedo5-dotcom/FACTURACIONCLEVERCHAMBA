@@ -1,12 +1,12 @@
 import { BankTransactionType } from "@/generated/prisma/enums";
+import { Select } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const TYPE_LABELS: Record<BankTransactionType, string> = {
   INCOME: "Ingreso",
   EXPENSE: "Egreso",
 };
-
-const selectClass =
-  "rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary";
 
 // Renders only the filter controls, no <form> of its own -- meant to be
 // rendered inside a shared GET form, mirroring PaymentValidationFilters/
@@ -29,67 +29,51 @@ export function BankTransactionFilters({
   return (
     <div className="flex flex-wrap items-end gap-3">
       {accounts && (
-        <div className="space-y-1">
-          <label htmlFor="bankAccountId" className="text-xs font-medium text-muted-foreground">
-            Cuenta bancaria
-          </label>
-          <select
-            id="bankAccountId"
-            name="bankAccountId"
-            defaultValue={defaultBankAccountId ?? ""}
-            className={selectClass}
-          >
-            <option value="">Todas</option>
-            {accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.bankName} · {account.alias}
-                {!account.active ? " (inactiva)" : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      <div className="space-y-1">
-        <label htmlFor="type" className="text-xs font-medium text-muted-foreground">
-          Tipo de movimiento
-        </label>
-        <select id="type" name="type" defaultValue={defaultType ?? ""} className={selectClass}>
-          <option value="">Todos</option>
-          {Object.entries(TYPE_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
+        <Select
+          id="bankAccountId"
+          name="bankAccountId"
+          label="Cuenta bancaria"
+          defaultValue={defaultBankAccountId ?? ""}
+          wrapperClassName="w-auto"
+        >
+          <option value="">Todas</option>
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.bankName} · {account.alias}
+              {!account.active ? " (inactiva)" : ""}
             </option>
           ))}
-        </select>
-      </div>
+        </Select>
+      )}
 
-      <div className="space-y-1">
-        <label htmlFor="dateFrom" className="text-xs font-medium text-muted-foreground">
-          Desde
-        </label>
-        <input
-          id="dateFrom"
-          type="date"
-          name="dateFrom"
-          defaultValue={defaultDateFrom ?? ""}
-          className={selectClass}
-        />
-      </div>
+      <Select id="type" name="type" label="Tipo de movimiento" defaultValue={defaultType ?? ""} wrapperClassName="w-auto">
+        <option value="">Todos</option>
+        {Object.entries(TYPE_LABELS).map(([value, label]) => (
+          <option key={value} value={value}>
+            {label}
+          </option>
+        ))}
+      </Select>
 
-      <div className="space-y-1">
-        <label htmlFor="dateTo" className="text-xs font-medium text-muted-foreground">
-          Hasta
-        </label>
-        <input id="dateTo" type="date" name="dateTo" defaultValue={defaultDateTo ?? ""} className={selectClass} />
-      </div>
+      <Input
+        id="dateFrom"
+        type="date"
+        name="dateFrom"
+        label="Desde"
+        defaultValue={defaultDateFrom ?? ""}
+        wrapperClassName="w-auto"
+      />
 
-      <button
-        type="submit"
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark"
-      >
-        Filtrar
-      </button>
+      <Input
+        id="dateTo"
+        type="date"
+        name="dateTo"
+        label="Hasta"
+        defaultValue={defaultDateTo ?? ""}
+        wrapperClassName="w-auto"
+      />
+
+      <Button type="submit">Filtrar</Button>
     </div>
   );
 }

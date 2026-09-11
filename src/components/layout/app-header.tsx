@@ -27,12 +27,12 @@ export function AppHeader({
         type="button"
         onClick={onOpenMobileNav}
         aria-label="Abrir navegación"
-        className="-ml-1.5 flex size-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-black/5 lg:hidden"
+        className="-ml-1.5 flex size-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-primary-soft lg:hidden"
       >
         <Menu className="size-5" aria-hidden />
       </button>
 
-      <h1 className="flex-1 truncate text-base font-semibold text-foreground sm:text-lg">
+      <h1 className="flex-1 truncate text-base font-semibold tracking-tight text-foreground sm:text-lg">
         {title}
       </h1>
 

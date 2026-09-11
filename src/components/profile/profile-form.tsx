@@ -4,19 +4,14 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import { UserAvatar } from "@/components/shared/user-avatar";
 import type { ProfileFormState } from "@/app/(app)/perfil/actions";
 import type { UserProfile } from "@/server/repositories/user-repository";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 
 export type ProfileFormAction = (
   state: ProfileFormState,
   formData: FormData,
 ) => Promise<ProfileFormState>;
-
-function fieldClass(hasError: boolean) {
-  return `w-full rounded-md border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:ring-1 ${
-    hasError
-      ? "border-error focus:border-error focus:ring-error"
-      : "border-border focus:border-primary focus:ring-primary"
-  }`;
-}
 
 export function ProfileForm({
   action,
@@ -72,137 +67,105 @@ export function ProfileForm({
   const displayAvatarUrl = previewUrl ?? profile.avatarUrl;
 
   return (
-    <form
-      action={formAction}
-      encType="multipart/form-data"
-      className="max-w-xl space-y-6 rounded-lg border border-border bg-surface p-6"
-      noValidate
-    >
-      <div>
-        <h3 className="text-sm font-semibold text-foreground">Mi perfil</h3>
-        <p className="text-xs text-muted-foreground">
-          Esta información es visible para ti y para los administradores.
-        </p>
-      </div>
-
-      <div className="flex items-center gap-4">
-        {previewUrl ? (
-          // Local preview of the not-yet-saved file -- plain <img> since
-          // it's a blob: URL, which next/image can't optimize anyway.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={previewUrl}
-            alt={profile.name}
-            className="size-16 shrink-0 rounded-full object-cover"
-          />
-        ) : (
-          <UserAvatar name={profile.name} avatarUrl={displayAvatarUrl} size="md" />
-        )}
-        <div className="space-y-1">
-          <label
-            htmlFor="avatar"
-            className="inline-block cursor-pointer rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-black/5"
-          >
-            Cambiar foto
-          </label>
-          <input
-            ref={fileInputRef}
-            id="avatar"
-            name="avatar"
-            type="file"
-            accept="image/jpeg,image/jpg,image/png,image/webp"
-            disabled={pending}
-            onChange={handleAvatarChange}
-            className="sr-only"
-          />
-          <p className="text-xs text-muted-foreground">JPG, PNG o WEBP. Máximo 5 MB.</p>
-          {errors?.avatar && <p className="text-sm text-error">{errors.avatar}</p>}
+    <Card padding="md" className="max-w-xl">
+      <form action={formAction} encType="multipart/form-data" className="space-y-4" noValidate>
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Mi perfil</h3>
+          <p className="text-xs text-muted-foreground">
+            Esta información es visible para ti y para los administradores.
+          </p>
         </div>
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="name" className="text-sm font-medium text-foreground">
-          Nombre
-        </label>
-        <input
+        <div className="flex items-center gap-4">
+          {previewUrl ? (
+            // Local preview of the not-yet-saved file -- plain <img> since
+            // it's a blob: URL, which next/image can't optimize anyway.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={previewUrl}
+              alt={profile.name}
+              className="size-16 shrink-0 rounded-full object-cover"
+            />
+          ) : (
+            <UserAvatar name={profile.name} avatarUrl={displayAvatarUrl} size="md" />
+          )}
+          <div className="space-y-1">
+            <label
+              htmlFor="avatar"
+              className="inline-block cursor-pointer rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-black/5"
+            >
+              Cambiar foto
+            </label>
+            <input
+              ref={fileInputRef}
+              id="avatar"
+              name="avatar"
+              type="file"
+              accept="image/jpeg,image/jpg,image/png,image/webp"
+              disabled={pending}
+              onChange={handleAvatarChange}
+              className="sr-only"
+            />
+            <p className="text-xs text-muted-foreground">JPG, PNG o WEBP. Máximo 5 MB.</p>
+            {errors?.avatar && <p className="text-sm text-error">{errors.avatar}</p>}
+          </div>
+        </div>
+
+        <Input
           id="name"
           name="name"
+          label="Nombre"
           defaultValue={profile.name}
           disabled={pending}
-          className={fieldClass(!!errors?.name)}
+          error={errors?.name}
         />
-        {errors?.name && <p className="text-sm text-error">{errors.name}</p>}
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="email" className="text-sm font-medium text-foreground">
-          Email
-        </label>
-        <input
+        <Input
           id="email"
           name="email"
           type="email"
+          label="Email"
           defaultValue={profile.email}
           disabled={pending}
-          className={fieldClass(!!errors?.email)}
+          error={errors?.email}
         />
-        {errors?.email && <p className="text-sm text-error">{errors.email}</p>}
-      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1">
-          <label htmlFor="phone" className="text-sm font-medium text-foreground">
-            Teléfono <span className="font-normal text-muted-foreground">(opcional)</span>
-          </label>
-          <input
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
             id="phone"
             name="phone"
+            label="Teléfono (opcional)"
             defaultValue={profile.phone ?? ""}
             disabled={pending}
-            className={fieldClass(!!errors?.phone)}
+            error={errors?.phone}
           />
-          {errors?.phone && <p className="text-sm text-error">{errors.phone}</p>}
-        </div>
 
-        <div className="space-y-1">
-          <label htmlFor="country" className="text-sm font-medium text-foreground">
-            País <span className="font-normal text-muted-foreground">(opcional)</span>
-          </label>
-          <input
+          <Input
             id="country"
             name="country"
+            label="País (opcional)"
             defaultValue={profile.country ?? ""}
             disabled={pending}
-            className={fieldClass(!!errors?.country)}
+            error={errors?.country}
           />
-          {errors?.country && <p className="text-sm text-error">{errors.country}</p>}
         </div>
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="city" className="text-sm font-medium text-foreground">
-          Ciudad <span className="font-normal text-muted-foreground">(opcional)</span>
-        </label>
-        <input
+        <Input
           id="city"
           name="city"
+          label="Ciudad (opcional)"
           defaultValue={profile.city ?? ""}
           disabled={pending}
-          className={fieldClass(!!errors?.city)}
+          error={errors?.city}
         />
-        {errors?.city && <p className="text-sm text-error">{errors.city}</p>}
-      </div>
 
-      {formError && <p className="text-sm text-error">{formError}</p>}
-      {succeeded && <p className="text-sm text-success">Perfil actualizado correctamente.</p>}
+        {formError && <p className="text-sm text-error">{formError}</p>}
+        {succeeded && <p className="text-sm text-success">Perfil actualizado correctamente.</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-dark disabled:opacity-60"
-      >
-        {pending ? "Guardando…" : "Guardar cambios"}
-      </button>
-    </form>
+        <Button type="submit" disabled={pending} loading={pending}>
+          {pending ? "Guardando…" : "Guardar cambios"}
+        </Button>
+      </form>
+    </Card>
   );
 }
